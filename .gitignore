@@ -22,6 +22,8 @@ local.db
 # Logs
 *.log
 logs/
+data/*.out
+data/*.err
 
 # OS
 .DS_Store
