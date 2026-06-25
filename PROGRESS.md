@@ -2,14 +2,14 @@
 
 Human-readable companion to `BUILD_STATE.json`. On resume, **read `BUILD_STATE.json` first** and continue from `next_action`.
 
-## Status: Phase 3 — Simulation engines
+## Status: Phase 5 — APIs & auth
 
 | Phase | Description | Status |
 |---|---|---|
 | 1 | Scaffold, config, DB models + migrations, seed plant | ✅ done |
 | 2 | Open-Meteo client + raw storage + 96-block normalization | ✅ done (verified vs live API) |
-| 3 | Solar / wind / hybrid engines + unit tests | ⏳ pending |
-| 4 | Output persistence + daily summaries + versioning | ⏳ pending |
+| 3 | Solar / wind / hybrid engines + unit tests | ✅ done (21 tests pass) |
+| 4 | Output persistence + daily summaries + versioning | ✅ done (e2e verified) |
 | 5 | FastAPI endpoints + API-key auth + rate limit + logging | ⏳ pending |
 | 6 | Scheduler (daily + manual) + data-quality enforcement | ⏳ pending |
 | 7 | Dashboard | ⏳ pending |

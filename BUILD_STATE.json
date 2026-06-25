@@ -1,9 +1,9 @@
 {
   "project": "Renewable Generation Simulation Platform",
   "build_complete": false,
-  "current_phase": 3,
-  "last_completed_step": "Phase 2 complete: Open-Meteo async client (mode->endpoint selection, retry/backoff/429, wind in m/s), normalize to 96 blocks (native m15 + hourly->15min interpolation with flags), raw+normalized persistence. VERIFIED against LIVE API for LIVE/FORECAST/historical-forecast/ERA5-archive modes.",
-  "next_action": "Phase 3-4: build app/engines/solar.py, wind.py, hybrid.py per spec math; app/simulate.py orchestrator (fetch->raw store->normalize->engines->persist generation blocks + daily summary with versioning + caching); unit tests for engines.",
+  "current_phase": 5,
+  "last_completed_step": "Phase 3-4 complete: solar/wind/hybrid engines, quality checks, simulate.py orchestrator (caching, versioning, live per-block forecast labelling, run/error logging). 21 unit tests pass. E2E verified vs live API (past/today/future/deep-archive + reprocess): solar specific yield ~4.14 kWh/kWp/day, solar CUF ~26%.",
+  "next_action": "Phase 5: FastAPI app (app/main.py), 8 endpoints (app/api/routes_plants.py + routes_admin.py), Pydantic schemas, API-key auth dependency (hashed, scope, rate limit, usage logging), data labels on responses.",
   "design_decisions": [
     "Site location not present in Book1 (4).xlsx (no lat/long text or coordinates). Per spec, location is a configurable placeholder. Defaulting seed plant to Jaisalmer, Rajasthan, India (lat=26.9124, lon=70.9026, tz=Asia/Kolkata) - a strong solar+wind hybrid region good for realism validation. Override via .env (PLANT_LAT/PLANT_LON/PLANT_TZ) or DB config.",
     "DB: SQLAlchemy with DATABASE_URL; defaults to SQLite (zero-config local) and Postgres in docker-compose. Alembic provides migrations; app also supports create_all bootstrap for SQLite fallback.",
