@@ -1,0 +1,20 @@
+# Pinned dependencies (verified installable on Python 3.11 and 3.14)
+fastapi==0.135.2
+uvicorn[standard]==0.42.0
+httpx==0.28.1
+SQLAlchemy==2.0.51
+pydantic==2.12.5
+pydantic-settings==2.13.1
+APScheduler==3.11.0
+alembic==1.16.5
+numpy==2.4.3
+pandas==3.0.1
+Jinja2==3.1.6
+python-multipart==0.0.22
+tzdata==2025.3
+# Postgres driver (used in docker-compose; SQLite needs no driver)
+psycopg2-binary==2.9.10
+# Test / quality tooling
+pytest==9.0.3
+pytest-asyncio==1.1.0
+ruff==0.14.5

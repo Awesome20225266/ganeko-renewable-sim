@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local DB / data
+*.sqlite3
+*.db
+data/*.sqlite3
+local.db
+
+# Env / secrets
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep the reference workbook out of git history (27MB)
+Book1 (4).xlsx

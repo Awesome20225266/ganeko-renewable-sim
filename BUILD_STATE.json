@@ -1,0 +1,21 @@
+{
+  "project": "Renewable Generation Simulation Platform",
+  "build_complete": false,
+  "current_phase": 2,
+  "last_completed_step": "Phase 1 complete: settings, all DB models, Alembic initial migration (187b7cae8814), idempotent seed verified (migrate->seed chain works on clean DB).",
+  "next_action": "Phase 2: build app/weather/client.py (async Open-Meteo client, endpoint selection by mode, retry/backoff/429, raw persistence) and app/weather/normalize.py (hourly->15min into 96 blocks with interpolation flags). Verify against LIVE API.",
+  "design_decisions": [
+    "Site location not present in Book1 (4).xlsx (no lat/long text or coordinates). Per spec, location is a configurable placeholder. Defaulting seed plant to Jaisalmer, Rajasthan, India (lat=26.9124, lon=70.9026, tz=Asia/Kolkata) - a strong solar+wind hybrid region good for realism validation. Override via .env (PLANT_LAT/PLANT_LON/PLANT_TZ) or DB config.",
+    "DB: SQLAlchemy with DATABASE_URL; defaults to SQLite (zero-config local) and Postgres in docker-compose. Alembic provides migrations; app also supports create_all bootstrap for SQLite fallback.",
+    "Scheduler: APScheduler in-process. Dashboard: FastAPI-served HTML + Chart.js (self-contained, CDN).",
+    "Capacities confirmed from workbook: Solar AC=160MW, Solar DC=240MW (DC/AC=1.5), Wind AC=135MW, PPA=140MW, block=15min, 96 blocks/day."
+  ],
+  "tasks": [
+    {"id": 1, "name": "Scaffold, config, DB models, migrations, seed", "status": "in_progress"},
+    {"id": 2, "name": "Open-Meteo client + raw storage + normalization", "status": "pending"},
+    {"id": 3, "name": "Solar/wind/hybrid engines + persistence + versioning", "status": "pending"},
+    {"id": 4, "name": "FastAPI endpoints + auth + rate limit + logging", "status": "pending"},
+    {"id": 5, "name": "Scheduler + quality + dashboard + reprocess + key mgmt", "status": "pending"},
+    {"id": 6, "name": "Tests + Docker + README + e2e + health report + BUILD_COMPLETE", "status": "pending"}
+  ]
+}
