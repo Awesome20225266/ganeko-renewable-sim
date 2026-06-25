@@ -2,7 +2,7 @@
 
 Human-readable companion to `BUILD_STATE.json`. On resume, **read `BUILD_STATE.json` first** and continue from `next_action`.
 
-## Status: Phase 5 — APIs & auth
+## Status: Phase 9 — Docker, docs, health report
 
 | Phase | Description | Status |
 |---|---|---|
@@ -10,6 +10,10 @@ Human-readable companion to `BUILD_STATE.json`. On resume, **read `BUILD_STATE.j
 | 2 | Open-Meteo client + raw storage + 96-block normalization | ✅ done (verified vs live API) |
 | 3 | Solar / wind / hybrid engines + unit tests | ✅ done (21 tests pass) |
 | 4 | Output persistence + daily summaries + versioning | ✅ done (e2e verified) |
+| 5 | FastAPI endpoints + API-key auth + rate limit + logging | ✅ done (9 api tests) |
+| 6 | Scheduler (daily + manual) + data-quality enforcement | ✅ done |
+| 7 | Dashboard | ✅ done |
+| 8 | Reprocessing API + admin key management | ✅ done |
 | 5 | FastAPI endpoints + API-key auth + rate limit + logging | ⏳ pending |
 | 6 | Scheduler (daily + manual) + data-quality enforcement | ⏳ pending |
 | 7 | Dashboard | ⏳ pending |

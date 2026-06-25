@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Renewable Generation Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0f1623; --card:#172033; --ink:#e8eef7; --muted:#90a0b8;
+          --solar:#f5b301; --wind:#2dd4bf; --total:#8b5cf6; --line:#243149; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+  h1 { font-size:18px; margin:0; } h2 { font-size:14px; color:var(--muted); margin:0 0 10px; text-transform:uppercase; letter-spacing:.05em; }
+  .sub { color:var(--muted); font-size:13px; }
+  main { padding:20px 24px; max-width:1200px; margin:0 auto; }
+  .grid { display:grid; gap:16px; }
+  .kpis { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); margin-bottom:18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .kpi .v { font-size:24px; font-weight:600; } .kpi .l { color:var(--muted); font-size:12px; margin-top:4px; }
+  .chartbox { position:relative; height:340px; }
+  .row2 { grid-template-columns:1fr 1fr; } @media(max-width:840px){ .row2{grid-template-columns:1fr;} }
+  .legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:8px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; }
+  .sw { width:22px; height:0; border-top:3px solid; display:inline-block; }
+  .dash { border-top-style:dashed !important; }
+  .badge { padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600; }
+  .ok{ background:#0f3d2e; color:#34d399; } .partial{ background:#3d340f; color:#fbbf24; } .failed{ background:#3d0f17; color:#f87171; }
+  select { background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; } th,td { padding:6px 8px; text-align:right; border-bottom:1px solid var(--line); } th:first-child,td:first-child{ text-align:left; }
+  .muted{ color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="plantName">Renewable Generation Dashboard</h1>
+    <div class="sub" id="plantSub">loading…</div>
+  </div>
+  <div style="display:flex; gap:12px; align-items:center;">
+    <span id="quality" class="badge ok">—</span>
+    <span class="sub">Plant: <input id="plantCode" value="__DEFAULT_PLANT__" style="width:110px; background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:6px;"/></span>
+    <span class="sub" id="updated"></span>
+  </div>
+</header>
+
+<main>
+  <div class="grid kpis">
+    <div class="card kpi"><div class="v" id="kSolar">— MW</div><div class="l">Solar now</div></div>
+    <div class="card kpi"><div class="v" id="kWind">— MW</div><div class="l">Wind now</div></div>
+    <div class="card kpi"><div class="v" id="kTotal">— MW</div><div class="l">Hybrid now</div></div>
+    <div class="card kpi"><div class="v" id="kCum">— MWh</div><div class="l">Energy so far today</div></div>
+    <div class="card kpi"><div class="v" id="kBlock">—</div><div class="l">Current block / 96</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <h2>Today — Solar / Wind / Hybrid (15-min blocks)</h2>
+    <div class="chartbox"><canvas id="genChart"></canvas></div>
+    <div class="legend">
+      <span class="chip"><span class="sw" style="border-color:var(--solar)"></span>Solar</span>
+      <span class="chip"><span class="sw" style="border-color:var(--wind)"></span>Wind</span>
+      <span class="chip"><span class="sw" style="border-color:var(--total)"></span>Hybrid total</span>
+      <span class="chip"><span class="sw dash" style="border-color:var(--muted)"></span>Forecast (remaining blocks)</span>
+      <span class="chip">● completed · ◯ forecast · ▲ interpolated</span>
+    </div>
+  </div>
+
+  <div class="grid row2">
+    <div class="card">
+      <h2>Weather variables used</h2>
+      <div class="chartbox" style="height:260px;"><canvas id="wxChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Previous days</h2>
+      <div class="chartbox" style="height:260px;"><canvas id="histChart"></canvas></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const REFRESH = (__REFRESH_SECONDS__ || 900) * 1000;
+let genChart, wxChart, histChart;
+
+function colorPoints(blocks, curBlock, base) {
+  return blocks.map(b => b.block_no <= curBlock ? base : 'transparent');
+}
+function pointStyles(blocks, curBlock) {
+  return blocks.map(b => b.interpolated ? 'triangle' : (b.block_no <= curBlock ? 'circle' : 'circle'));
+}
+
+async function load() {
+  const code = document.getElementById('plantCode').value.trim() || '__DEFAULT_PLANT__';
+  let data;
+  try {
+    const r = await fetch(`/dashboard/api/today/${code}`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    data = await r.json();
+  } catch (e) {
+    document.getElementById('plantSub').textContent = 'Error: ' + e.message;
+    return;
+  }
+  const cur = data.current_block_no;
+  document.getElementById('plantName').textContent = data.plant_name + ' — Live';
+  document.getElementById('plantSub').textContent =
+    `${data.plant_code} · ${data.date} · ${data.timezone} · Solar ${data.solar_ac_mw} MW + Wind ${data.wind_ac_mw} MW`;
+  document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+  const c = data.current || {};
+  document.getElementById('kSolar').textContent = (c.solar_mw ?? 0).toFixed(1) + ' MW';
+  document.getElementById('kWind').textContent = (c.wind_mw ?? 0).toFixed(1) + ' MW';
+  document.getElementById('kTotal').textContent = (c.total_mw ?? 0).toFixed(1) + ' MW';
+  document.getElementById('kCum').textContent = data.cumulative_total_mwh.toFixed(1) + ' MWh';
+  document.getElementById('kBlock').textContent = cur + ' / 96';
+
+  const anyInterp = data.blocks.some(b => b.interpolated);
+  const q = document.getElementById('quality');
+  if (anyInterp) { q.className = 'badge partial'; q.textContent = 'PARTIAL · interpolated blocks'; }
+  else { q.className = 'badge ok'; q.textContent = 'OK'; }
+
+  const labels = data.blocks.map(b => b.time);
+  const dashSeg = (ctx) => ctx.p0DataIndex >= cur - 1 ? [6,4] : undefined;
+  const mk = (key, color) => ({
+    label: key, data: data.blocks.map(b => b[key]),
+    borderColor: color, backgroundColor: color, tension: .35, borderWidth: 2,
+    pointRadius: data.blocks.map(b => b.interpolated ? 3 : 0),
+    pointStyle: pointStyles(data.blocks, cur),
+    segment: { borderDash: dashSeg }, fill: false,
+  });
+  const ds = [mk('solar_mw', getCss('--solar')), mk('wind_mw', getCss('--wind')), mk('total_mw', getCss('--total'))];
+
+  if (!genChart) {
+    genChart = new Chart(document.getElementById('genChart'), {
+      type: 'line', data: { labels, datasets: ds },
+      options: baseOpts('MW'),
+    });
+    // vertical "now" line plugin
+  } else { genChart.data.labels = labels; genChart.data.datasets = ds; genChart.update(); }
+
+  // Weather chart
+  const wx = [
+    { label:'POA (W/m²)', data:data.blocks.map(b=>b.poa), borderColor:'#f5b301', yAxisID:'y', tension:.35, borderWidth:2, pointRadius:0 },
+    { label:'Wind @100m (m/s)', data:data.blocks.map(b=>b.wind_speed), borderColor:'#2dd4bf', yAxisID:'y1', tension:.35, borderWidth:2, pointRadius:0 },
+    { label:'Temp (°C)', data:data.blocks.map(b=>b.temp), borderColor:'#f87171', yAxisID:'y1', tension:.35, borderWidth:2, pointRadius:0 },
+  ];
+  if (!wxChart) {
+    wxChart = new Chart(document.getElementById('wxChart'), { type:'line', data:{ labels, datasets:wx }, options: dualOpts() });
+  } else { wxChart.data.labels = labels; wxChart.data.datasets = wx; wxChart.update(); }
+
+  loadHistory(code);
+}
+
+async function loadHistory(code) {
+  let h; try { h = await (await fetch(`/dashboard/api/history/${code}?days=7`)).json(); } catch { return; }
+  const labels = h.summaries.map(s=>s.date);
+  const ds = [
+    { label:'Solar MWh', data:h.summaries.map(s=>s.solar_mwh), backgroundColor:getCss('--solar') },
+    { label:'Wind MWh', data:h.summaries.map(s=>s.wind_mwh), backgroundColor:getCss('--wind') },
+  ];
+  if (!histChart) {
+    histChart = new Chart(document.getElementById('histChart'), {
+      type:'bar', data:{ labels, datasets:ds },
+      options:{ responsive:true, maintainAspectRatio:false, scales:{ x:{stacked:true, ticks:{color:'#90a0b8'}, grid:{color:'#243149'}}, y:{stacked:true, ticks:{color:'#90a0b8'}, grid:{color:'#243149'}} }, plugins:{ legend:{ labels:{ color:'#e8eef7' } } } }
+    });
+  } else { histChart.data.labels = labels; histChart.data.datasets = ds; histChart.update(); }
+}
+
+function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function baseOpts(unit){ return { responsive:true, maintainAspectRatio:false,
+  interaction:{ mode:'index', intersect:false },
+  scales:{ x:{ ticks:{ color:'#90a0b8', maxTicksLimit:12 }, grid:{ color:'#243149' } },
+           y:{ title:{display:true,text:unit,color:'#90a0b8'}, ticks:{ color:'#90a0b8' }, grid:{ color:'#243149' }, beginAtZero:true } },
+  plugins:{ legend:{ labels:{ color:'#e8eef7' } } } }; }
+function dualOpts(){ return { responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+  scales:{ x:{ ticks:{color:'#90a0b8', maxTicksLimit:12}, grid:{color:'#243149'} },
+           y:{ position:'left', ticks:{color:'#90a0b8'}, grid:{color:'#243149'}, beginAtZero:true },
+           y1:{ position:'right', ticks:{color:'#90a0b8'}, grid:{drawOnChartArea:false}, beginAtZero:true } },
+  plugins:{ legend:{ labels:{ color:'#e8eef7' } } } }; }
+
+document.getElementById('plantCode').addEventListener('change', load);
+load();
+setInterval(load, REFRESH);
+</script>
+</body>
+</html>
