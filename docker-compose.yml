@@ -1,0 +1,63 @@
+# Brings up db + api + scheduler + dashboard with one command:
+#   docker compose up --build
+# The api auto-runs migrations + idempotent seed on start.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: renew
+      POSTGRES_PASSWORD: renew
+      POSTGRES_DB: renewable
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U renew -d renewable"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    command: ["api"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://renew:renew@db:5432/renewable
+      SCHEDULER_ENABLED: "false"   # the dedicated scheduler service owns jobs
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  scheduler:
+    build: .
+    command: ["scheduler"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://renew:renew@db:5432/renewable
+      SCHEDULER_ENABLED: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  # Dashboard is served by the FastAPI app at /dashboard. This second instance
+  # exposes it on its own port (some deployments isolate the public dashboard).
+  dashboard:
+    build: .
+    command: ["api"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://renew:renew@db:5432/renewable
+      SCHEDULER_ENABLED: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+
+volumes:
+  pgdata:

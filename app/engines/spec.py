@@ -38,7 +38,7 @@ class PlantSpec:
     block_minutes: int = 15
 
     @classmethod
-    def from_orm(cls, cfg) -> "PlantSpec":
+    def from_orm(cls, cfg) -> PlantSpec:
         return cls(
             plant_code=cfg.plant_code,
             plant_name=cfg.plant_name,

@@ -1,7 +1,7 @@
 """Unit tests for the solar, wind and hybrid engines."""
 from __future__ import annotations
 
-from app.engines.hybrid import simulate_block, simulate_day
+from app.engines.hybrid import simulate_day
 from app.engines.solar import simulate_solar_block
 from app.engines.wind import simulate_wind_block
 from tests.conftest import make_block
@@ -69,7 +69,7 @@ def test_wind_follows_power_curve_monotonic(spec):
     speeds = [4, 6, 8, 10, 12]
     outputs = [simulate_wind_block(spec, make_block(10, ws100=s)).mw for s in speeds]
     # Output strictly increases with wind speed across the rising part of the curve.
-    assert all(b > a for a, b in zip(outputs, outputs[1:]))
+    assert all(b > a for a, b in zip(outputs, outputs[1:], strict=False))
 
 
 def test_wind_hub_extrapolation_from_10m(spec):

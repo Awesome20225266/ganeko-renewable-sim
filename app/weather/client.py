@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime
 from enum import Enum
 from typing import Any
 
@@ -259,7 +259,7 @@ async def fetch_weather(
     async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": "renewable-sim/1.0"}) as client:
         resp = await _get_with_retry(client, url, params, settings.OPEN_METEO_MAX_RETRIES)
         data = resp.json()
-    fetched_at = datetime.now(timezone.utc)
+    fetched_at = datetime.now(UTC)
     logger.info(
         "Fetched weather plant=%s date=%s mode=%s source=%s status=ok",
         plant.plant_code, sim_date, mode.value, source,

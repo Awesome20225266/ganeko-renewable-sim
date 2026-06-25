@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
@@ -68,7 +68,7 @@ async def usage_logging(request: Request, call_next):
                         method=request.method,
                         status_code=response.status_code,
                         client_host=request.client.host if request.client else None,
-                        ts=datetime.now(timezone.utc),
+                        ts=datetime.now(UTC),
                     )
                 )
         except Exception as exc:  # noqa: BLE001

@@ -1,7 +1,7 @@
 """Admin-only endpoints (7-8): reprocess and API-key management."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -78,7 +78,7 @@ def create_key(req: CreateKeyRequest, ctx: AuthContext = Depends(require_admin))
     raw = generate_api_key("rk" if req.scope == "read" else "admin")
     expires_at = None
     if req.expires_in_days:
-        expires_at = datetime.now(timezone.utc) + timedelta(days=req.expires_in_days)
+        expires_at = datetime.now(UTC) + timedelta(days=req.expires_in_days)
     with session_scope() as db:
         row = ApiKey(
             team=req.team,

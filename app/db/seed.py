@@ -6,7 +6,7 @@ reused if ADMIN_BOOTSTRAP_KEY is set; otherwise a random key is generated and pr
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -169,7 +169,7 @@ def run_seed() -> dict:
                         scope="admin",
                         is_active=True,
                         rate_limit_per_min=600,
-                        created_at=datetime.now(timezone.utc),
+                        created_at=datetime.now(UTC),
                     )
                 )
                 result["created"].append("admin api_key")

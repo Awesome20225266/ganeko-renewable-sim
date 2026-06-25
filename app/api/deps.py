@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
@@ -58,8 +58,8 @@ def _authenticate(request: Request, raw_key: str | None) -> ApiKey:
         if api_key.expires_at is not None:
             exp = api_key.expires_at
             if exp.tzinfo is None:
-                exp = exp.replace(tzinfo=timezone.utc)
-            if exp < datetime.now(timezone.utc):
+                exp = exp.replace(tzinfo=UTC)
+            if exp < datetime.now(UTC):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED, detail="API key expired."
                 )
@@ -69,7 +69,7 @@ def _authenticate(request: Request, raw_key: str | None) -> ApiKey:
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Rate limit exceeded ({limit}/min).",
             )
-        api_key.last_used_at = datetime.now(timezone.utc)
+        api_key.last_used_at = datetime.now(UTC)
         db.commit()
         # Stash for usage-logging middleware.
         request.state.api_key_id = api_key.id

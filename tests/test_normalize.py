@@ -45,7 +45,7 @@ def test_exactly_96_blocks_no_gaps():
     # 15-minute spacing, no duplicate timestamps.
     starts = [b.block_start for b in blocks]
     assert len(set(starts)) == 96
-    for a, b in zip(blocks, blocks[1:]):
+    for a, b in zip(blocks, blocks[1:], strict=False):
         assert (b.block_start - a.block_start).total_seconds() == 900
 
 

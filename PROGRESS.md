@@ -2,7 +2,7 @@
 
 Human-readable companion to `BUILD_STATE.json`. On resume, **read `BUILD_STATE.json` first** and continue from `next_action`.
 
-## Status: Phase 9 — Docker, docs, health report
+## Status: ✅ BUILD COMPLETE
 
 | Phase | Description | Status |
 |---|---|---|
@@ -14,6 +14,8 @@ Human-readable companion to `BUILD_STATE.json`. On resume, **read `BUILD_STATE.j
 | 6 | Scheduler (daily + manual) + data-quality enforcement | ✅ done |
 | 7 | Dashboard | ✅ done |
 | 8 | Reprocessing API + admin key management | ✅ done |
+| 9 | Tests, Docker, README, e2e smoke run | ✅ done (30 tests, ruff clean) |
+| 10 | Final health + realism validation → `BUILD_COMPLETE` | ✅ done (see HEALTH_REPORT.md) |
 | 5 | FastAPI endpoints + API-key auth + rate limit + logging | ⏳ pending |
 | 6 | Scheduler (daily + manual) + data-quality enforcement | ⏳ pending |
 | 7 | Dashboard | ⏳ pending |

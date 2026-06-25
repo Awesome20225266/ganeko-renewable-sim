@@ -192,7 +192,7 @@ def normalize_to_blocks(
         if ghi_v <= 0.0 and poa_v <= 0.0:
             is_day_v = 0
 
-        def cell(name: str) -> float | None:
+        def cell(name: str, i: int = i) -> float | None:
             s = cols.get(name)
             if s is None:
                 return None

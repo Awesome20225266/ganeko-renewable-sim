@@ -1,0 +1,13 @@
+BUILD COMPLETE — Renewable Generation Simulation Platform
+
+All 10 phases done. All acceptance criteria met. System health + simulation
+realism validation pass (see HEALTH_REPORT.md).
+
+- 30 automated tests pass; ruff clean.
+- Live Open-Meteo integration verified for HISTORICAL / LIVE / FORECAST + ERA5 archive.
+- 8 API endpoints secured (401/403/429), data-labelled; dashboard renders.
+- Scheduler (daily + live-refresh + manual) operational.
+- Docker compose (db/api/scheduler/dashboard), Alembic migrations, idempotent seed.
+- Golden reference day stored for regression.
+
+Do not treat the build as unfinished while this marker exists.

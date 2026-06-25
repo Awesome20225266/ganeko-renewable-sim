@@ -5,10 +5,9 @@ so the dashboard needs no API key. The 8 business APIs remain key-protected.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse

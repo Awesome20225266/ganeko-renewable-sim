@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import traceback
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -137,7 +137,7 @@ def _persist_generation(
     if quality.status == "FAILED":
         summary_label = "FAILED"
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     current_block = _current_block_no(spec.timezone, sim_date) if mode == DataMode.LIVE else 96
 
     # Versioning: demote all currently-current rows for this plant/date/mode, then
@@ -265,7 +265,7 @@ async def run_simulation(
             status="OK",
             simulation_version=settings.SIMULATION_VERSION,
             triggered_by=triggered_by,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         db.add(run)
         db.flush()
@@ -319,7 +319,7 @@ async def run_simulation(
                 {
                     "status": run_status,
                     "blocks_written": len(results),
-                    "finished_at": datetime.now(timezone.utc),
+                    "finished_at": datetime.now(UTC),
                     "message": "; ".join(quality.issues) if quality.issues else "ok",
                 }
             )
@@ -363,7 +363,7 @@ async def run_simulation(
             db.query(SimulationRun).filter(SimulationRun.id == run_id).update(
                 {
                     "status": "FAILED",
-                    "finished_at": datetime.now(timezone.utc),
+                    "finished_at": datetime.now(UTC),
                     "message": str(exc),
                 }
             )

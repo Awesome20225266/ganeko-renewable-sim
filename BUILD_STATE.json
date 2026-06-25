@@ -1,21 +1,23 @@
 {
   "project": "Renewable Generation Simulation Platform",
-  "build_complete": false,
-  "current_phase": 9,
-  "last_completed_step": "Phases 5-8 complete: FastAPI app + 8 secured endpoints + API-key auth/scope/rate-limit/usage-logging; APScheduler (daily + live-refresh + manual); dashboard (HTML+Chart.js, open read-only feeds, distinguishes completed/forecast/interpolated); reprocess + key mgmt (create/list/revoke/rotate); CLI. 30 tests pass (engines/normalize/quality/api).",
-  "next_action": "Phase 9-10: live server smoke test (start uvicorn, hit all endpoints w/ valid+invalid keys), Dockerfile + docker-compose + Makefile + scripts/auto_resume.sh, README, e2e smoke (past/today/future), HEALTH_REPORT.md realism validation, write BUILD_COMPLETE.",
+  "build_complete": true,
+  "current_phase": 10,
+  "last_completed_step": "Phase 9-10 complete. Docker (Dockerfile + compose: db/api/scheduler/dashboard), entrypoint, Makefile, scripts/auto_resume.sh, README, scripts/realism_check.py, golden_reference_day.json, HEALTH_REPORT.md. 30 tests pass; ruff clean; live API verified; all 8 endpoints auth-checked; dashboard renders; scheduler starts + manual jobs run; realism validation PASS. BUILD_COMPLETE marker written.",
+  "next_action": "DONE. Build is complete. Nothing further required unless the user requests changes.",
   "design_decisions": [
-    "Site location not present in Book1 (4).xlsx (no lat/long text or coordinates). Per spec, location is a configurable placeholder. Defaulting seed plant to Jaisalmer, Rajasthan, India (lat=26.9124, lon=70.9026, tz=Asia/Kolkata) - a strong solar+wind hybrid region good for realism validation. Override via .env (PLANT_LAT/PLANT_LON/PLANT_TZ) or DB config.",
-    "DB: SQLAlchemy with DATABASE_URL; defaults to SQLite (zero-config local) and Postgres in docker-compose. Alembic provides migrations; app also supports create_all bootstrap for SQLite fallback.",
-    "Scheduler: APScheduler in-process. Dashboard: FastAPI-served HTML + Chart.js (self-contained, CDN).",
-    "Capacities confirmed from workbook: Solar AC=160MW, Solar DC=240MW (DC/AC=1.5), Wind AC=135MW, PPA=140MW, block=15min, 96 blocks/day."
+    "Site location not present in Book1 (4).xlsx (verified: no lat/long text/coordinates anywhere in the 35k-row sheet). Per spec, location is a configurable placeholder. Seed defaults to Jaisalmer, Rajasthan (26.9124, 70.9026, Asia/Kolkata) - strong solar+wind. Override via .env (PLANT_LAT/PLANT_LON/PLANT_TZ) or DB.",
+    "DB: SQLAlchemy via DATABASE_URL; SQLite zero-config local default, Postgres in docker-compose. Alembic migration (187b7cae8814) + create_all bootstrap fallback.",
+    "Open-Meteo: wind requested in m/s (wind_speed_unit=ms) for the power curve. minutely_15 used natively when present, else robust hourly->15min interpolation; ERA5 archive (hourly) flagged interpolated.",
+    "Single generation_block table holds the per-block hybrid record (solar+wind+total), queryable by data_mode; reprocess preserves history via is_current demotion + versioned rows. Documented as a justified deviation from 3 separate output tables.",
+    "Scheduler: APScheduler in-process (daily + live-refresh) and standalone runner for the docker scheduler service. Dashboard served by FastAPI at /dashboard with open read-only feeds (no secrets).",
+    "Capacities from workbook: Solar AC=160, DC=240 (1.5), Wind AC=135, PPA=140, 96 15-min blocks/day."
   ],
   "tasks": [
-    {"id": 1, "name": "Scaffold, config, DB models, migrations, seed", "status": "in_progress"},
-    {"id": 2, "name": "Open-Meteo client + raw storage + normalization", "status": "pending"},
-    {"id": 3, "name": "Solar/wind/hybrid engines + persistence + versioning", "status": "pending"},
-    {"id": 4, "name": "FastAPI endpoints + auth + rate limit + logging", "status": "pending"},
-    {"id": 5, "name": "Scheduler + quality + dashboard + reprocess + key mgmt", "status": "pending"},
-    {"id": 6, "name": "Tests + Docker + README + e2e + health report + BUILD_COMPLETE", "status": "pending"}
+    {"id": 1, "name": "Scaffold, config, DB models, migrations, seed", "status": "done"},
+    {"id": 2, "name": "Open-Meteo client + raw storage + normalization", "status": "done"},
+    {"id": 3, "name": "Solar/wind/hybrid engines + persistence + versioning", "status": "done"},
+    {"id": 4, "name": "FastAPI endpoints + auth + rate limit + logging", "status": "done"},
+    {"id": 5, "name": "Scheduler + quality + dashboard + reprocess + key mgmt", "status": "done"},
+    {"id": 6, "name": "Tests + Docker + README + e2e + health report + BUILD_COMPLETE", "status": "done"}
   ]
 }
