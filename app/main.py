@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from app.api.routes_admin import router as admin_router
@@ -49,6 +50,15 @@ app = FastAPI(
         "PARTIAL / FAILED / FINALIZED)."
     ),
     lifespan=lifespan,
+)
+
+_origins = [o.strip() for o in get_settings().CORS_ALLOW_ORIGINS.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins or ["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

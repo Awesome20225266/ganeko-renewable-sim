@@ -3,181 +3,416 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Renewable Generation Dashboard</title>
+<title>Renewable Generation Platform</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   :root { --bg:#0f1623; --card:#172033; --ink:#e8eef7; --muted:#90a0b8;
-          --solar:#f5b301; --wind:#2dd4bf; --total:#8b5cf6; --line:#243149; }
+          --solar:#f5b301; --wind:#2dd4bf; --total:#8b5cf6; --line:#243149; --accent:#3b82f6; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
-  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
-  h1 { font-size:18px; margin:0; } h2 { font-size:14px; color:var(--muted); margin:0 0 10px; text-transform:uppercase; letter-spacing:.05em; }
-  .sub { color:var(--muted); font-size:13px; }
-  main { padding:20px 24px; max-width:1200px; margin:0 auto; }
+  header { padding:14px 22px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+  h1 { font-size:17px; margin:0; } h2 { font-size:13px; color:var(--muted); margin:0 0 10px; text-transform:uppercase; letter-spacing:.05em; }
+  .sub { color:var(--muted); font-size:12.5px; }
+  .ctrls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  input, select { background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:13px; }
+  input[type=number]{ width:120px; }
+  label.fld { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer; font-weight:600; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--ink); }
+  button:hover { filter:brightness(1.1); }
+  nav { display:flex; gap:4px; padding:0 22px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  nav a { padding:12px 16px; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; font-size:14px; font-weight:600; }
+  nav a.active { color:var(--ink); border-bottom-color:var(--accent); }
+  main { padding:20px 22px; max-width:1200px; margin:0 auto; }
+  .tab { display:none; } .tab.active { display:block; }
   .grid { display:grid; gap:16px; }
-  .kpis { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); margin-bottom:18px; }
+  .kpis { grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); margin-bottom:16px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
-  .kpi .v { font-size:24px; font-weight:600; } .kpi .l { color:var(--muted); font-size:12px; margin-top:4px; }
+  .kpi .v { font-size:22px; font-weight:600; } .kpi .l { color:var(--muted); font-size:12px; margin-top:4px; }
   .chartbox { position:relative; height:340px; }
   .row2 { grid-template-columns:1fr 1fr; } @media(max-width:840px){ .row2{grid-template-columns:1fr;} }
   .legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:8px; }
   .chip { display:inline-flex; align-items:center; gap:6px; }
-  .sw { width:22px; height:0; border-top:3px solid; display:inline-block; }
-  .dash { border-top-style:dashed !important; }
+  .sw { width:22px; height:0; border-top:3px solid; display:inline-block; } .dash { border-top-style:dashed !important; }
   .badge { padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600; }
   .ok{ background:#0f3d2e; color:#34d399; } .partial{ background:#3d340f; color:#fbbf24; } .failed{ background:#3d0f17; color:#f87171; }
-  select { background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
-  table { width:100%; border-collapse:collapse; font-size:13px; } th,td { padding:6px 8px; text-align:right; border-bottom:1px solid var(--line); } th:first-child,td:first-child{ text-align:left; }
-  .muted{ color:var(--muted); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; } th,td { padding:6px 8px; text-align:right; border-bottom:1px solid var(--line); } th:first-child,td:first-child{ text-align:left; }
+  thead th { color:var(--muted); position:sticky; top:0; background:var(--card); }
+  .tablewrap { max-height:360px; overflow:auto; }
+  .formgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; }
+  .toast { position:fixed; bottom:20px; right:20px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px; font-size:13px; max-width:380px; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  .toast.err { border-color:#f87171; } .toast.good { border-color:#34d399; }
+  code, pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:10px; display:block; white-space:pre-wrap; word-break:break-all; font-size:12px; color:#cfe0f5; }
+  .muted{ color:var(--muted); } .keyrow{ font-family:monospace; }
 </style>
 </head>
 <body>
 <header>
   <div>
-    <h1 id="plantName">Renewable Generation Dashboard</h1>
-    <div class="sub" id="plantSub">loading…</div>
+    <h1 id="hdrTitle">Renewable Generation Platform</h1>
+    <div class="sub" id="hdrSub">solar / wind / hybrid — live Open-Meteo</div>
   </div>
-  <div style="display:flex; gap:12px; align-items:center;">
-    <span id="quality" class="badge ok">—</span>
-    <span class="sub">Plant: <input id="plantCode" value="__DEFAULT_PLANT__" style="width:110px; background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:6px;"/></span>
-    <span class="sub" id="updated"></span>
+  <div class="ctrls">
+    <label class="fld">Plant<input id="plantCode" value="__DEFAULT_PLANT__" style="width:110px"/></label>
+    <label class="fld">Admin key (for Config / API keys)<input id="adminKey" type="password" placeholder="X-API-Key" style="width:200px"/></label>
   </div>
 </header>
 
+<nav id="nav">
+  <a data-tab="live" class="active">Live</a>
+  <a data-tab="explore">Explore by Date</a>
+  <a data-tab="weather">Weather</a>
+  <a data-tab="config">Plant Config</a>
+  <a data-tab="apikeys">API &amp; Keys</a>
+</nav>
+
 <main>
-  <div class="grid kpis">
-    <div class="card kpi"><div class="v" id="kSolar">— MW</div><div class="l">Solar now</div></div>
-    <div class="card kpi"><div class="v" id="kWind">— MW</div><div class="l">Wind now</div></div>
-    <div class="card kpi"><div class="v" id="kTotal">— MW</div><div class="l">Hybrid now</div></div>
-    <div class="card kpi"><div class="v" id="kCum">— MWh</div><div class="l">Energy so far today</div></div>
-    <div class="card kpi"><div class="v" id="kBlock">—</div><div class="l">Current block / 96</div></div>
-  </div>
+  <!-- LIVE -->
+  <section id="tab-live" class="tab active">
+    <div class="grid kpis">
+      <div class="card kpi"><div class="v" id="kSolar">— MW</div><div class="l">Solar now</div></div>
+      <div class="card kpi"><div class="v" id="kWind">— MW</div><div class="l">Wind now</div></div>
+      <div class="card kpi"><div class="v" id="kTotal">— MW</div><div class="l">Hybrid now</div></div>
+      <div class="card kpi"><div class="v" id="kCum">— MWh</div><div class="l">Energy so far today</div></div>
+      <div class="card kpi"><div class="v" id="kBlock">—</div><div class="l">Current block / 96</div></div>
+      <div class="card kpi"><div class="v"><span id="liveQ" class="badge ok">—</span></div><div class="l">Data quality</div></div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <h2 id="liveHd">Today — Solar / Wind / Hybrid (15-min blocks)</h2>
+      <div class="chartbox"><canvas id="genChart"></canvas></div>
+      <div class="legend">
+        <span class="chip"><span class="sw" style="border-color:var(--solar)"></span>Solar</span>
+        <span class="chip"><span class="sw" style="border-color:var(--wind)"></span>Wind</span>
+        <span class="chip"><span class="sw" style="border-color:var(--total)"></span>Hybrid total</span>
+        <span class="chip"><span class="sw dash" style="border-color:var(--muted)"></span>Forecast (remaining)</span>
+        <span class="chip">▲ interpolated</span>
+      </div>
+    </div>
+    <div class="grid row2">
+      <div class="card"><h2>Weather used today</h2><div class="chartbox" style="height:260px;"><canvas id="wxLiveChart"></canvas></div></div>
+      <div class="card"><h2>Previous days</h2><div class="chartbox" style="height:260px;"><canvas id="histChart"></canvas></div></div>
+    </div>
+  </section>
 
-  <div class="card" style="margin-bottom:16px;">
-    <h2>Today — Solar / Wind / Hybrid (15-min blocks)</h2>
-    <div class="chartbox"><canvas id="genChart"></canvas></div>
-    <div class="legend">
-      <span class="chip"><span class="sw" style="border-color:var(--solar)"></span>Solar</span>
-      <span class="chip"><span class="sw" style="border-color:var(--wind)"></span>Wind</span>
-      <span class="chip"><span class="sw" style="border-color:var(--total)"></span>Hybrid total</span>
-      <span class="chip"><span class="sw dash" style="border-color:var(--muted)"></span>Forecast (remaining blocks)</span>
-      <span class="chip">● completed · ◯ forecast · ▲ interpolated</span>
+  <!-- EXPLORE -->
+  <section id="tab-explore" class="tab">
+    <div class="card" style="margin-bottom:16px;">
+      <div class="ctrls">
+        <label class="fld">Date<input type="date" id="expDate"/></label>
+        <label class="fld">Mode<select id="expMode"><option>HISTORICAL</option><option>LIVE</option><option>FORECAST</option></select></label>
+        <button onclick="exploreView()">View</button>
+        <button class="ghost" onclick="exploreGenerate()">Generate (fetch &amp; simulate)</button>
+        <span id="expLabel" class="badge ok" style="display:none"></span>
+      </div>
+      <div class="sub" style="margin-top:8px">“Generate” fetches live Open-Meteo data for the date and runs the simulation (needs admin key). “View” shows already-simulated data.</div>
     </div>
-  </div>
+    <div class="grid kpis" id="expKpis" style="display:none">
+      <div class="card kpi"><div class="v" id="eSolar">—</div><div class="l">Solar MWh</div></div>
+      <div class="card kpi"><div class="v" id="eWind">—</div><div class="l">Wind MWh</div></div>
+      <div class="card kpi"><div class="v" id="eTotal">—</div><div class="l">Total MWh</div></div>
+      <div class="card kpi"><div class="v" id="eSCuf">—</div><div class="l">Solar CUF</div></div>
+      <div class="card kpi"><div class="v" id="eWCuf">—</div><div class="l">Wind CUF</div></div>
+      <div class="card kpi"><div class="v" id="eYield">—</div><div class="l">kWh/kWp</div></div>
+    </div>
+    <div class="card"><h2>Generation</h2><div class="chartbox"><canvas id="expChart"></canvas></div></div>
+  </section>
 
-  <div class="grid row2">
-    <div class="card">
-      <h2>Weather variables used</h2>
-      <div class="chartbox" style="height:260px;"><canvas id="wxChart"></canvas></div>
+  <!-- WEATHER -->
+  <section id="tab-weather" class="tab">
+    <div class="card" style="margin-bottom:16px;">
+      <div class="ctrls">
+        <label class="fld">Date<input type="date" id="wxDate"/></label>
+        <label class="fld">Mode<select id="wxMode"><option>LIVE</option><option>HISTORICAL</option><option>FORECAST</option></select></label>
+        <button onclick="weatherView()">View weather</button>
+        <span id="wxSrc" class="sub"></span>
+      </div>
     </div>
+    <div class="card" style="margin-bottom:16px;"><h2>Weather variables (15-min)</h2><div class="chartbox"><canvas id="wxChart"></canvas></div></div>
+    <div class="card"><h2>Weather table</h2><div class="tablewrap"><table id="wxTable"><thead><tr>
+      <th>Time</th><th>GHI</th><th>POA</th><th>DNI</th><th>Temp °C</th><th>Cloud %</th><th>Wind100 m/s</th><th>Gust</th><th>Dir°</th><th>hPa</th><th>Day</th><th>Interp</th>
+    </tr></thead><tbody></tbody></table></div></div>
+  </section>
+
+  <!-- CONFIG -->
+  <section id="tab-config" class="tab">
     <div class="card">
-      <h2>Previous days</h2>
-      <div class="chartbox" style="height:260px;"><canvas id="histChart"></canvas></div>
+      <h2>Plant configuration <span class="sub" id="cfgVer"></span></h2>
+      <div class="sub" style="margin-bottom:14px">Editing capacities / location creates a new config version (history preserved). Requires the admin key. After saving, use “Generate” on the Explore tab to regenerate outputs.</div>
+      <div class="formgrid" id="cfgForm">
+        <label class="fld">Plant name<input id="c_plant_name"/></label>
+        <label class="fld">Latitude<input id="c_latitude" type="number" step="0.0001"/></label>
+        <label class="fld">Longitude<input id="c_longitude" type="number" step="0.0001"/></label>
+        <label class="fld">Timezone (IANA)<input id="c_timezone"/></label>
+        <label class="fld">Solar AC (MW)<input id="c_solar_ac_mw" type="number" step="0.1"/></label>
+        <label class="fld">Solar DC (MW)<input id="c_solar_dc_mw" type="number" step="0.1"/></label>
+        <label class="fld">Performance ratio<input id="c_solar_performance_ratio" type="number" step="0.01"/></label>
+        <label class="fld">Solar loss factor<input id="c_solar_loss_factor" type="number" step="0.01"/></label>
+        <label class="fld">Temp coeff (%/°C)<input id="c_temp_coeff_pct_per_c" type="number" step="0.01"/></label>
+        <label class="fld">Panel tilt (°)<input id="c_panel_tilt" type="number" step="1"/></label>
+        <label class="fld">Panel azimuth (°)<input id="c_panel_azimuth" type="number" step="1"/></label>
+        <label class="fld">Use tilted irradiance<select id="c_use_global_tilted_irradiance"><option value="true">true</option><option value="false">false</option></select></label>
+        <label class="fld">Wind AC (MW)<input id="c_wind_ac_mw" type="number" step="0.1"/></label>
+        <label class="fld">Wind loss factor<input id="c_wind_loss_factor" type="number" step="0.01"/></label>
+        <label class="fld">Hub height (m)<input id="c_hub_height_m" type="number" step="1"/></label>
+        <label class="fld">Cut-in (m/s)<input id="c_cut_in_ms" type="number" step="0.1"/></label>
+        <label class="fld">Rated (m/s)<input id="c_rated_ms" type="number" step="0.1"/></label>
+        <label class="fld">Cut-out (m/s)<input id="c_cut_out_ms" type="number" step="0.1"/></label>
+        <label class="fld">Air-density correction<select id="c_air_density_correction"><option value="true">true</option><option value="false">false</option></select></label>
+      </div>
+      <div style="margin-top:16px; display:flex; gap:10px;">
+        <button onclick="saveConfig()">Save new version</button>
+        <button class="ghost" onclick="loadConfig()">Reload</button>
+      </div>
     </div>
-  </div>
+  </section>
+
+  <!-- API & KEYS -->
+  <section id="tab-apikeys" class="tab">
+    <div class="grid row2">
+      <div class="card">
+        <h2>Generate API key</h2>
+        <div class="sub" style="margin-bottom:12px">Mint a key for another user/team, then download a share file with ready-to-run examples. Requires admin key.</div>
+        <div class="formgrid">
+          <label class="fld">Team<input id="k_team" value="external"/></label>
+          <label class="fld">Name<input id="k_name" value="data-consumer"/></label>
+          <label class="fld">Scope<select id="k_scope"><option value="read">read</option><option value="admin">admin</option></select></label>
+          <label class="fld">Rate limit / min<input id="k_rate" type="number" value="120"/></label>
+          <label class="fld">Expires in days (blank=never)<input id="k_exp" type="number"/></label>
+        </div>
+        <div style="margin-top:14px;"><button onclick="createKey()">Generate key</button></div>
+        <div id="newKeyBox" style="margin-top:14px; display:none;">
+          <div class="sub">New key (shown once):</div>
+          <code id="newKey"></code>
+          <div style="margin-top:10px; display:flex; gap:10px;">
+            <button onclick="downloadShare()">⬇ Download API share file</button>
+            <button class="ghost" onclick="navigator.clipboard.writeText(window._newKey)">Copy key</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Existing keys <button class="ghost" style="float:right;padding:4px 10px" onclick="listKeys()">Refresh</button></h2>
+        <div class="tablewrap"><table id="keyTable"><thead><tr><th>Prefix</th><th>Team</th><th>Scope</th><th>Active</th><th>Rate</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <h2>How another user fetches the data</h2>
+      <pre id="apiExamples"></pre>
+    </div>
+  </section>
 </main>
+
+<div id="toast"></div>
 
 <script>
 const REFRESH = (__REFRESH_SECONDS__ || 900) * 1000;
-let genChart, wxChart, histChart;
+const ORIGIN = window.location.origin;
+const charts = {};
+function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function plant(){ return document.getElementById('plantCode').value.trim() || '__DEFAULT_PLANT__'; }
+function adminKey(){ return document.getElementById('adminKey').value.trim() || localStorage.getItem('adminKey') || ''; }
+function toast(msg, kind='good'){ const t=document.getElementById('toast'); t.className='toast '+kind; t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', 4500); }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
 
-function colorPoints(blocks, curBlock, base) {
-  return blocks.map(b => b.block_no <= curBlock ? base : 'transparent');
-}
-function pointStyles(blocks, curBlock) {
-  return blocks.map(b => b.interpolated ? 'triangle' : (b.block_no <= curBlock ? 'circle' : 'circle'));
-}
+document.getElementById('adminKey').value = localStorage.getItem('adminKey') || '';
+document.getElementById('adminKey').addEventListener('change', e => localStorage.setItem('adminKey', e.target.value.trim()));
 
-async function load() {
-  const code = document.getElementById('plantCode').value.trim() || '__DEFAULT_PLANT__';
-  let data;
-  try {
-    const r = await fetch(`/dashboard/api/today/${code}`);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    data = await r.json();
-  } catch (e) {
-    document.getElementById('plantSub').textContent = 'Error: ' + e.message;
-    return;
-  }
-  const cur = data.current_block_no;
-  document.getElementById('plantName').textContent = data.plant_name + ' — Live';
-  document.getElementById('plantSub').textContent =
-    `${data.plant_code} · ${data.date} · ${data.timezone} · Solar ${data.solar_ac_mw} MW + Wind ${data.wind_ac_mw} MW`;
-  document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
-  const c = data.current || {};
-  document.getElementById('kSolar').textContent = (c.solar_mw ?? 0).toFixed(1) + ' MW';
-  document.getElementById('kWind').textContent = (c.wind_mw ?? 0).toFixed(1) + ' MW';
-  document.getElementById('kTotal').textContent = (c.total_mw ?? 0).toFixed(1) + ' MW';
-  document.getElementById('kCum').textContent = data.cumulative_total_mwh.toFixed(1) + ' MWh';
-  document.getElementById('kBlock').textContent = cur + ' / 96';
+// ---- tabs ----
+document.querySelectorAll('#nav a').forEach(a => a.onclick = () => {
+  document.querySelectorAll('#nav a').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  a.classList.add('active');
+  const id = a.dataset.tab;
+  document.getElementById('tab-'+id).classList.add('active');
+  if (id==='config') loadConfig();
+  if (id==='apikeys'){ listKeys(); renderExamples(); }
+  if (id==='explore' && !document.getElementById('expDate').value) document.getElementById('expDate').value = todayISO();
+  if (id==='weather' && !document.getElementById('wxDate').value) document.getElementById('wxDate').value = todayISO();
+});
 
-  const anyInterp = data.blocks.some(b => b.interpolated);
-  const q = document.getElementById('quality');
-  if (anyInterp) { q.className = 'badge partial'; q.textContent = 'PARTIAL · interpolated blocks'; }
-  else { q.className = 'badge ok'; q.textContent = 'OK'; }
-
-  const labels = data.blocks.map(b => b.time);
-  const dashSeg = (ctx) => ctx.p0DataIndex >= cur - 1 ? [6,4] : undefined;
-  const mk = (key, color) => ({
-    label: key, data: data.blocks.map(b => b[key]),
-    borderColor: color, backgroundColor: color, tension: .35, borderWidth: 2,
-    pointRadius: data.blocks.map(b => b.interpolated ? 3 : 0),
-    pointStyle: pointStyles(data.blocks, cur),
-    segment: { borderDash: dashSeg }, fill: false,
-  });
-  const ds = [mk('solar_mw', getCss('--solar')), mk('wind_mw', getCss('--wind')), mk('total_mw', getCss('--total'))];
-
-  if (!genChart) {
-    genChart = new Chart(document.getElementById('genChart'), {
-      type: 'line', data: { labels, datasets: ds },
-      options: baseOpts('MW'),
-    });
-    // vertical "now" line plugin
-  } else { genChart.data.labels = labels; genChart.data.datasets = ds; genChart.update(); }
-
-  // Weather chart
-  const wx = [
-    { label:'POA (W/m²)', data:data.blocks.map(b=>b.poa), borderColor:'#f5b301', yAxisID:'y', tension:.35, borderWidth:2, pointRadius:0 },
-    { label:'Wind @100m (m/s)', data:data.blocks.map(b=>b.wind_speed), borderColor:'#2dd4bf', yAxisID:'y1', tension:.35, borderWidth:2, pointRadius:0 },
-    { label:'Temp (°C)', data:data.blocks.map(b=>b.temp), borderColor:'#f87171', yAxisID:'y1', tension:.35, borderWidth:2, pointRadius:0 },
-  ];
-  if (!wxChart) {
-    wxChart = new Chart(document.getElementById('wxChart'), { type:'line', data:{ labels, datasets:wx }, options: dualOpts() });
-  } else { wxChart.data.labels = labels; wxChart.data.datasets = wx; wxChart.update(); }
-
-  loadHistory(code);
-}
-
-async function loadHistory(code) {
-  let h; try { h = await (await fetch(`/dashboard/api/history/${code}?days=7`)).json(); } catch { return; }
-  const labels = h.summaries.map(s=>s.date);
-  const ds = [
-    { label:'Solar MWh', data:h.summaries.map(s=>s.solar_mwh), backgroundColor:getCss('--solar') },
-    { label:'Wind MWh', data:h.summaries.map(s=>s.wind_mwh), backgroundColor:getCss('--wind') },
-  ];
-  if (!histChart) {
-    histChart = new Chart(document.getElementById('histChart'), {
-      type:'bar', data:{ labels, datasets:ds },
-      options:{ responsive:true, maintainAspectRatio:false, scales:{ x:{stacked:true, ticks:{color:'#90a0b8'}, grid:{color:'#243149'}}, y:{stacked:true, ticks:{color:'#90a0b8'}, grid:{color:'#243149'}} }, plugins:{ legend:{ labels:{ color:'#e8eef7' } } } }
-    });
-  } else { histChart.data.labels = labels; histChart.data.datasets = ds; histChart.update(); }
-}
-
-function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
-function baseOpts(unit){ return { responsive:true, maintainAspectRatio:false,
-  interaction:{ mode:'index', intersect:false },
-  scales:{ x:{ ticks:{ color:'#90a0b8', maxTicksLimit:12 }, grid:{ color:'#243149' } },
-           y:{ title:{display:true,text:unit,color:'#90a0b8'}, ticks:{ color:'#90a0b8' }, grid:{ color:'#243149' }, beginAtZero:true } },
+function baseOpts(unit){ return { responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+  scales:{ x:{ ticks:{color:'#90a0b8',maxTicksLimit:12}, grid:{color:'#243149'} },
+           y:{ title:{display:true,text:unit,color:'#90a0b8'}, ticks:{color:'#90a0b8'}, grid:{color:'#243149'}, beginAtZero:true } },
   plugins:{ legend:{ labels:{ color:'#e8eef7' } } } }; }
-function dualOpts(){ return { responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
-  scales:{ x:{ ticks:{color:'#90a0b8', maxTicksLimit:12}, grid:{color:'#243149'} },
-           y:{ position:'left', ticks:{color:'#90a0b8'}, grid:{color:'#243149'}, beginAtZero:true },
-           y1:{ position:'right', ticks:{color:'#90a0b8'}, grid:{drawOnChartArea:false}, beginAtZero:true } },
-  plugins:{ legend:{ labels:{ color:'#e8eef7' } } } }; }
+function dualOpts(){ const o=baseOpts(''); o.scales.y1={position:'right',ticks:{color:'#90a0b8'},grid:{drawOnChartArea:false},beginAtZero:true}; return o; }
 
-document.getElementById('plantCode').addEventListener('change', load);
-load();
-setInterval(load, REFRESH);
+// ---------------- LIVE ----------------
+async function loadLive() {
+  let d;
+  try { const r = await fetch(`/dashboard/api/today/${plant()}`); if(!r.ok) throw new Error((await r.json()).detail); d = await r.json(); }
+  catch(e){ document.getElementById('hdrSub').textContent='Error: '+e.message; return; }
+  const cur = d.current_block_no;
+  document.getElementById('hdrTitle').textContent = d.plant_name;
+  document.getElementById('hdrSub').textContent = `${d.plant_code} · ${d.date} · ${d.timezone} · Solar ${d.solar_ac_mw} MW + Wind ${d.wind_ac_mw} MW`;
+  const c = d.current || {};
+  document.getElementById('kSolar').textContent=(c.solar_mw??0).toFixed(1)+' MW';
+  document.getElementById('kWind').textContent=(c.wind_mw??0).toFixed(1)+' MW';
+  document.getElementById('kTotal').textContent=(c.total_mw??0).toFixed(1)+' MW';
+  document.getElementById('kCum').textContent=d.cumulative_total_mwh.toFixed(1)+' MWh';
+  document.getElementById('kBlock').textContent=cur+' / 96';
+  const interp = d.blocks.some(b=>b.interpolated);
+  const q=document.getElementById('liveQ'); q.className='badge '+(interp?'partial':'ok'); q.textContent=interp?'PARTIAL':'OK';
+  const labels=d.blocks.map(b=>b.time);
+  const dash=ctx=>ctx.p0DataIndex>=cur-1?[6,4]:undefined;
+  const mk=(k,col)=>({label:k,data:d.blocks.map(b=>b[k]),borderColor:col,backgroundColor:col,tension:.35,borderWidth:2,
+    pointRadius:d.blocks.map(b=>b.interpolated?3:0),pointStyle:d.blocks.map(b=>b.interpolated?'triangle':'circle'),segment:{borderDash:dash},fill:false});
+  const ds=[mk('solar_mw',css('--solar')),mk('wind_mw',css('--wind')),mk('total_mw',css('--total'))];
+  upsert('genChart',{type:'line',data:{labels,datasets:ds},options:baseOpts('MW')});
+  const wx=[{label:'POA (W/m²)',data:d.blocks.map(b=>b.poa),borderColor:css('--solar'),yAxisID:'y',tension:.35,borderWidth:2,pointRadius:0},
+    {label:'Wind100 (m/s)',data:d.blocks.map(b=>b.wind_speed),borderColor:css('--wind'),yAxisID:'y1',tension:.35,borderWidth:2,pointRadius:0},
+    {label:'Temp (°C)',data:d.blocks.map(b=>b.temp),borderColor:'#f87171',yAxisID:'y1',tension:.35,borderWidth:2,pointRadius:0}];
+  upsert('wxLiveChart',{type:'line',data:{labels,datasets:wx},options:dualOpts()});
+  loadHistory();
+}
+async function loadHistory(){
+  let h; try{ h=await(await fetch(`/dashboard/api/history/${plant()}?days=7`)).json(); }catch{ return; }
+  const labels=h.summaries.map(s=>s.date);
+  const ds=[{label:'Solar MWh',data:h.summaries.map(s=>s.solar_mwh),backgroundColor:css('--solar')},
+            {label:'Wind MWh',data:h.summaries.map(s=>s.wind_mwh),backgroundColor:css('--wind')}];
+  upsert('histChart',{type:'bar',data:{labels,datasets:ds},options:{responsive:true,maintainAspectRatio:false,
+    scales:{x:{stacked:true,ticks:{color:'#90a0b8'},grid:{color:'#243149'}},y:{stacked:true,ticks:{color:'#90a0b8'},grid:{color:'#243149'}}},plugins:{legend:{labels:{color:'#e8eef7'}}}}});
+}
+function upsert(id,cfg){ if(charts[id]){ charts[id].data=cfg.data; charts[id].options=cfg.options; charts[id].update(); } else { charts[id]=new Chart(document.getElementById(id),cfg); } }
+
+// ---------------- EXPLORE ----------------
+async function exploreView(){
+  const d=document.getElementById('expDate').value, m=document.getElementById('expMode').value;
+  if(!d){ toast('Pick a date','err'); return; }
+  let r; try{ r=await(await fetch(`/dashboard/api/day/${plant()}?date=${d}&mode=${m}`)).json(); }catch(e){ toast('Error loading','err'); return; }
+  const lbl=document.getElementById('expLabel');
+  if(!r.blocks.length){ lbl.style.display='inline-block'; lbl.className='badge failed'; lbl.textContent='No data — click Generate'; document.getElementById('expKpis').style.display='none'; if(charts.expChart){charts.expChart.destroy();delete charts.expChart;} return; }
+  lbl.style.display='inline-block'; lbl.className='badge ok'; lbl.textContent=r.data_label;
+  document.getElementById('expKpis').style.display='grid';
+  const s=r.summary||{};
+  eSolar.textContent=(s.solar_mwh??0)+' '; eWind.textContent=(s.wind_mwh??0)+' '; eTotal.textContent=(s.total_mwh??0)+' ';
+  eSCuf.textContent=(s.solar_cuf??0)+'%'; eWCuf.textContent=(s.wind_cuf??0)+'%'; eYield.textContent=(s.solar_specific_yield??0);
+  const labels=r.blocks.map(b=>b.time);
+  const mk=(k,col)=>({label:k,data:r.blocks.map(b=>b[k]),borderColor:col,backgroundColor:col,tension:.35,borderWidth:2,pointRadius:0,fill:false});
+  upsert('expChart',{type:'line',data:{labels,datasets:[mk('solar_mw',css('--solar')),mk('wind_mw',css('--wind')),mk('total_mw',css('--total'))]},options:baseOpts('MW')});
+}
+async function exploreGenerate(){
+  const d=document.getElementById('expDate').value, m=document.getElementById('expMode').value;
+  if(!d){ toast('Pick a date','err'); return; }
+  if(!adminKey()){ toast('Enter the admin key (top right) to generate','err'); return; }
+  toast('Fetching weather & simulating '+d+' …');
+  try{
+    const r=await fetch(`/admin/reprocess`,{method:'POST',headers:{'X-API-Key':adminKey(),'Content-Type':'application/json'},body:JSON.stringify({plant_code:plant(),dates:[d],mode:m})});
+    if(!r.ok) throw new Error((await r.json()).detail||r.status);
+    const j=await r.json(); toast(`Generated ${d}: ${j.results[0].data_label}, ${j.results[0].total_mwh} MWh`);
+    exploreView();
+  }catch(e){ toast('Generate failed: '+e.message,'err'); }
+}
+
+// ---------------- WEATHER ----------------
+async function weatherView(){
+  const d=document.getElementById('wxDate').value, m=document.getElementById('wxMode').value;
+  if(!d){ toast('Pick a date','err'); return; }
+  let r; try{ r=await(await fetch(`/dashboard/api/weather/${plant()}?date=${d}&mode=${m}`)).json(); }catch(e){ toast('Error','err'); return; }
+  document.getElementById('wxSrc').textContent = r.block_count? `source: ${r.weather_source} · ${r.block_count} blocks` : 'no weather data — generate this date on the Explore tab first';
+  const labels=r.blocks.map(b=>b.time);
+  const ds=[
+    {label:'GHI (W/m²)',data:r.blocks.map(b=>b.ghi),borderColor:'#fbbf24',yAxisID:'y',tension:.3,borderWidth:2,pointRadius:0},
+    {label:'POA (W/m²)',data:r.blocks.map(b=>b.poa),borderColor:css('--solar'),yAxisID:'y',tension:.3,borderWidth:2,pointRadius:0},
+    {label:'Wind100 (m/s)',data:r.blocks.map(b=>b.wind_speed_100m),borderColor:css('--wind'),yAxisID:'y1',tension:.3,borderWidth:2,pointRadius:0},
+    {label:'Temp (°C)',data:r.blocks.map(b=>b.temp),borderColor:'#f87171',yAxisID:'y1',tension:.3,borderWidth:2,pointRadius:0},
+  ];
+  upsert('wxChart',{type:'line',data:{labels,datasets:ds},options:dualOpts()});
+  const tb=document.querySelector('#wxTable tbody'); tb.innerHTML='';
+  r.blocks.forEach(b=>{ const tr=document.createElement('tr'); tr.innerHTML=
+    `<td>${b.time}</td><td>${f(b.ghi)}</td><td>${f(b.poa)}</td><td>${f(b.dni)}</td><td>${f(b.temp)}</td><td>${f(b.cloud_cover)}</td><td>${f(b.wind_speed_100m)}</td><td>${f(b.wind_gusts_10m)}</td><td>${f(b.wind_direction_100m)}</td><td>${f(b.surface_pressure)}</td><td>${b.is_day?'☀':'🌙'}</td><td>${b.interpolated?'▲':''}</td>`;
+    tb.appendChild(tr); });
+}
+function f(v){ return v==null?'—':v; }
+
+// ---------------- CONFIG ----------------
+const CFG_FIELDS=['plant_name','latitude','longitude','timezone','solar_ac_mw','solar_dc_mw','solar_performance_ratio','solar_loss_factor','temp_coeff_pct_per_c','panel_tilt','panel_azimuth','use_global_tilted_irradiance','wind_ac_mw','wind_loss_factor','hub_height_m','cut_in_ms','rated_ms','cut_out_ms','air_density_correction'];
+async function loadConfig(){
+  let c; try{ c=await(await fetch(`/dashboard/api/config/${plant()}`)).json(); }catch(e){ toast('Config load failed','err'); return; }
+  document.getElementById('cfgVer').textContent='(active version '+c.config_version+')';
+  CFG_FIELDS.forEach(k=>{ const el=document.getElementById('c_'+k); if(!el) return; el.value = (typeof c[k]==='boolean')? String(c[k]) : c[k]; });
+}
+async function saveConfig(){
+  if(!adminKey()){ toast('Enter the admin key to save config','err'); return; }
+  const body={};
+  CFG_FIELDS.forEach(k=>{ const el=document.getElementById('c_'+k); if(!el) return; let v=el.value;
+    if(el.type==='number') v=parseFloat(v);
+    if(k==='use_global_tilted_irradiance'||k==='air_density_correction') v=(el.value==='true');
+    body[k]=v; });
+  try{
+    const r=await fetch(`/plants/${plant()}/config`,{method:'PUT',headers:{'X-API-Key':adminKey(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok) throw new Error((await r.json()).detail||r.status);
+    const j=await r.json(); toast('Saved config version '+j.config_version+'. Regenerate dates on Explore to apply.');
+    loadConfig();
+  }catch(e){ toast('Save failed: '+e.message,'err'); }
+}
+
+// ---------------- API & KEYS ----------------
+async function listKeys(){
+  if(!adminKey()){ document.querySelector('#keyTable tbody').innerHTML='<tr><td colspan=6 class=muted>Enter admin key to list keys</td></tr>'; return; }
+  try{
+    const r=await fetch(`/admin/api-keys`,{headers:{'X-API-Key':adminKey()}});
+    if(!r.ok) throw new Error((await r.json()).detail||r.status);
+    const j=await r.json(); const tb=document.querySelector('#keyTable tbody'); tb.innerHTML='';
+    j.keys.forEach(k=>{ const tr=document.createElement('tr'); tr.innerHTML=
+      `<td class=keyrow>${k.key_prefix}…</td><td>${k.team}</td><td>${k.scope}</td><td>${k.is_active?'✅':'❌'}</td><td>${k.rate_limit_per_min}</td>`+
+      `<td>${k.is_active?`<button class=ghost style="padding:3px 8px" onclick="revokeKey('${k.key_prefix}')">revoke</button>`:''}</td>`;
+      tb.appendChild(tr); });
+  }catch(e){ toast('List failed: '+e.message,'err'); }
+}
+async function createKey(){
+  if(!adminKey()){ toast('Enter the admin key to generate','err'); return; }
+  const body={team:k_team.value,name:k_name.value,scope:k_scope.value,rate_limit_per_min:parseInt(k_rate.value||'120')};
+  if(k_exp.value) body.expires_in_days=parseInt(k_exp.value);
+  try{
+    const r=await fetch(`/admin/api-keys`,{method:'POST',headers:{'X-API-Key':adminKey(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok) throw new Error((await r.json()).detail||r.status);
+    const j=await r.json(); window._newKey=j.api_key;
+    document.getElementById('newKey').textContent=j.api_key;
+    document.getElementById('newKeyBox').style.display='block';
+    toast('Key generated for '+j.team+' / '+j.name); listKeys();
+  }catch(e){ toast('Generate failed: '+e.message,'err'); }
+}
+async function revokeKey(p){ if(!adminKey()){toast('Admin key required','err');return;}
+  try{ const r=await fetch(`/admin/api-keys/${p}`,{method:'DELETE',headers:{'X-API-Key':adminKey()}}); const j=await r.json(); toast(j.message||j.detail); listKeys(); }
+  catch(e){ toast('Revoke failed','err'); } }
+function shareText(key){
+  const c=plant();
+  return `Renewable Generation API — access details
+=================================================
+Base URL : ${ORIGIN}
+Plant    : ${c}
+API key  : ${key}
+Header   : X-API-Key: ${key}
+
+# --- curl ---
+curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/config
+curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/historical?date=2026-06-20"
+curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/live
+curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/forecast?horizon_days=3"
+curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/summary?date=2026-06-20"
+curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/range?start=2026-06-20&end=2026-06-25"
+curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/weather?date=2026-06-20&mode=HISTORICAL"
+
+# --- Python ---
+import requests
+H = {"X-API-Key": "${key}"}
+B = "${ORIGIN}"
+r = requests.get(f"{B}/plants/${c}/live", headers=H)
+print(r.json()["data_label"], r.json()["block_count"])
+
+Interactive docs: ${ORIGIN}/docs
+`;
+}
+function renderExamples(){ document.getElementById('apiExamples').textContent = shareText(window._newKey || '<YOUR_API_KEY>'); }
+function downloadShare(){
+  const blob=new Blob([shareText(window._newKey)],{type:'text/plain'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`renewable-api-${plant()}.txt`; a.click(); URL.revokeObjectURL(a.href);
+}
+
+// init
+document.getElementById('plantCode').addEventListener('change', loadLive);
+loadLive();
+setInterval(()=>{ if(document.getElementById('tab-live').classList.contains('active')) loadLive(); }, REFRESH);
 </script>
 </body>
 </html>

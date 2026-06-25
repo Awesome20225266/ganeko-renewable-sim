@@ -6,7 +6,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailySummary, GenerationBlock
+from app.db.models import DailySummary, GenerationBlock, WeatherBlock
 
 
 def get_blocks(
@@ -35,6 +35,19 @@ def get_blocks_range(
     if data_mode:
         q = q.where(GenerationBlock.data_mode == data_mode)
     q = q.order_by(GenerationBlock.sim_date, GenerationBlock.block_no)
+    return list(db.scalars(q))
+
+
+def get_weather_blocks(
+    db: Session, plant_code: str, sim_date: date, data_mode: str | None = None
+) -> list[WeatherBlock]:
+    q = select(WeatherBlock).where(
+        WeatherBlock.plant_code == plant_code,
+        WeatherBlock.sim_date == sim_date,
+    )
+    if data_mode:
+        q = q.where(WeatherBlock.data_mode == data_mode)
+    q = q.order_by(WeatherBlock.block_no)
     return list(db.scalars(q))
 
 

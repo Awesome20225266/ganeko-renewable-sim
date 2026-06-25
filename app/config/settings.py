@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # API / security
     DEFAULT_RATE_LIMIT_PER_MIN: int = 120
     API_KEY_HEADER: str = "X-API-Key"
+    # Comma-separated list of allowed CORS origins ("*" = any). Needed when other
+    # users fetch the API from a different origin / front-end.
+    CORS_ALLOW_ORIGINS: str = "*"
 
     # App
     LOG_LEVEL: str = "INFO"

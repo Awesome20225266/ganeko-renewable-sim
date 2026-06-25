@@ -2,8 +2,8 @@
   "project": "Renewable Generation Simulation Platform",
   "build_complete": true,
   "current_phase": 10,
-  "last_completed_step": "Phase 9-10 complete. Docker (Dockerfile + compose: db/api/scheduler/dashboard), entrypoint, Makefile, scripts/auto_resume.sh, README, scripts/realism_check.py, golden_reference_day.json, HEALTH_REPORT.md. 30 tests pass; ruff clean; live API verified; all 8 endpoints auth-checked; dashboard renders; scheduler starts + manual jobs run; realism validation PASS. BUILD_COMPLETE marker written.",
-  "next_action": "DONE. Build is complete. Nothing further required unless the user requests changes.",
+  "last_completed_step": "Post-build enhancement (Frontend v2 + deployment): tabbed dashboard (Live / Explore-by-date / Weather / Plant Config / API & Keys); PUT /plants/{code}/config (admin, versioned capacity+lat/long editing); GET /plants/{code}/weather (read); open dashboard feeds (config/day/weather); API-key generation + downloadable share file (key + curl/python snippets) from UI; date pickers; CORS middleware (CORS_ALLOW_ORIGINS); DEPLOYMENT.md (Docker-on-VM + PaaS + Postgres + HTTPS + security checklist). 34 tests pass; ruff clean; UI verified via preview (no console errors).",
+  "next_action": "DONE. Build + enhancements complete. Nothing further required unless the user requests changes.",
   "design_decisions": [
     "Site location not present in Book1 (4).xlsx (verified: no lat/long text/coordinates anywhere in the 35k-row sheet). Per spec, location is a configurable placeholder. Seed defaults to Jaisalmer, Rajasthan (26.9124, 70.9026, Asia/Kolkata) - strong solar+wind. Override via .env (PLANT_LAT/PLANT_LON/PLANT_TZ) or DB.",
     "DB: SQLAlchemy via DATABASE_URL; SQLite zero-config local default, Postgres in docker-compose. Alembic migration (187b7cae8814) + create_all bootstrap fallback.",

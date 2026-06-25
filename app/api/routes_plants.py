@@ -5,23 +5,28 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 
-from app.api.deps import AuthContext, require_read
+from app.api.deps import AuthContext, require_admin, require_read
 from app.api.repository import (
     get_blocks,
     get_blocks_range,
     get_summaries_range,
     get_summary,
+    get_weather_blocks,
 )
 from app.api.schemas import (
     BlockOut,
     BlockSeriesOut,
     DailySummaryOut,
     PlantConfigOut,
+    PlantConfigUpdate,
     SummaryListOut,
+    WeatherBlockOut,
+    WeatherSeriesOut,
 )
 from app.db.base import session_scope
-from app.db.models import DailySummary, GenerationBlock, SimulationVersion
+from app.db.models import DailySummary, GenerationBlock, Plant, PlantConfig, SimulationVersion
 from app.simulate import load_active_config
 
 router = APIRouter(prefix="/plants", tags=["plants"])
@@ -106,6 +111,125 @@ def plant_config(code: str, ctx: AuthContext = Depends(require_read)):
             block_minutes=cfg.block_minutes,
             wind_power_curve=cfg.wind_power_curve,
             assumptions=(ver.assumptions if ver else {}),
+        )
+
+
+def _config_to_out(cfg: PlantConfig, assumptions: dict) -> PlantConfigOut:
+    return PlantConfigOut(
+        plant_code=cfg.plant_code,
+        plant_name=cfg.plant_name,
+        latitude=cfg.latitude,
+        longitude=cfg.longitude,
+        timezone=cfg.timezone,
+        config_version=cfg.config_version,
+        solar_ac_mw=cfg.solar_ac_mw,
+        solar_dc_mw=cfg.solar_dc_mw,
+        dc_ac_ratio=cfg.dc_ac_ratio,
+        solar_performance_ratio=cfg.solar_performance_ratio,
+        solar_loss_factor=cfg.solar_loss_factor,
+        temp_coeff_pct_per_c=cfg.temp_coeff_pct_per_c,
+        panel_tilt=cfg.panel_tilt,
+        panel_azimuth=cfg.panel_azimuth,
+        use_global_tilted_irradiance=cfg.use_global_tilted_irradiance,
+        wind_ac_mw=cfg.wind_ac_mw,
+        wind_loss_factor=cfg.wind_loss_factor,
+        hub_height_m=cfg.hub_height_m,
+        cut_in_ms=cfg.cut_in_ms,
+        rated_ms=cfg.rated_ms,
+        cut_out_ms=cfg.cut_out_ms,
+        air_density_correction=cfg.air_density_correction,
+        block_minutes=cfg.block_minutes,
+        wind_power_curve=cfg.wind_power_curve,
+        assumptions=assumptions,
+    )
+
+
+@router.put("/{code}/config", response_model=PlantConfigOut)
+def update_plant_config(
+    code: str, body: PlantConfigUpdate, ctx: AuthContext = Depends(require_admin)
+):
+    """Update plant config (capacities, lat/long, timezone, ...) — ADMIN.
+
+    Creates a NEW versioned config (history preserved); the new version becomes active.
+    Re-run a simulation afterwards to regenerate outputs under the new assumptions.
+    """
+    fields = body.model_dump(exclude_unset=True, exclude_none=True)
+    with session_scope() as db:
+        try:
+            cur = load_active_config(db, code)
+        except ValueError:
+            raise HTTPException(404, f"Unknown plant '{code}'") from None
+        plant = db.scalar(select(Plant).where(Plant.plant_code == code))
+        new_version = cur.config_version + 1
+
+        # Carry forward all current values, then apply overrides.
+        carried = {
+            c.name: getattr(cur, c.name)
+            for c in PlantConfig.__table__.columns
+            if c.name not in ("id", "plant_id", "config_version", "is_active", "created_at")
+        }
+        carried.update(fields)
+        # Keep DC/AC ratio consistent when capacities change.
+        if carried.get("solar_ac_mw"):
+            carried["dc_ac_ratio"] = round(carried["solar_dc_mw"] / carried["solar_ac_mw"], 4)
+
+        # Deactivate previous active configs.
+        db.query(PlantConfig).filter(
+            PlantConfig.plant_code == code, PlantConfig.is_active.is_(True)
+        ).update({PlantConfig.is_active: False}, synchronize_session=False)
+
+        new_cfg = PlantConfig(
+            plant_id=plant.id, config_version=new_version, is_active=True, **carried
+        )
+        db.add(new_cfg)
+        if plant:
+            plant.active_config_version = new_version
+        db.flush()
+        ver = db.query(SimulationVersion).order_by(SimulationVersion.created_at.desc()).first()
+        return _config_to_out(new_cfg, ver.assumptions if ver else {})
+
+
+def _weather_block_to_out(w) -> WeatherBlockOut:
+    return WeatherBlockOut(
+        block_no=w.block_no,
+        block_start=w.block_start,
+        block_end=w.block_end,
+        interpolated=w.interpolated,
+        ghi=w.ghi,
+        poa=w.poa,
+        dni=w.dni,
+        dhi=w.dhi,
+        temperature_2m=w.temperature_2m,
+        cloud_cover=w.cloud_cover,
+        is_day=w.is_day,
+        wind_speed_10m=w.wind_speed_10m,
+        wind_speed_100m=w.wind_speed_100m,
+        wind_speed_120m=w.wind_speed_120m,
+        wind_direction_100m=w.wind_direction_100m,
+        wind_gusts_10m=w.wind_gusts_10m,
+        surface_pressure=w.surface_pressure,
+    )
+
+
+@router.get("/{code}/weather", response_model=WeatherSeriesOut)
+def weather(
+    code: str,
+    sim_date: date = Query(..., alias="date"),
+    mode: str | None = Query(None, description="HISTORICAL | LIVE | FORECAST"),
+    ctx: AuthContext = Depends(require_read),
+):
+    """Normalized 15-minute weather variables used for a given date."""
+    with session_scope() as db:
+        blocks = get_weather_blocks(db, code, sim_date, mode.upper() if mode else None)
+        if not blocks:
+            raise HTTPException(404, f"No weather data for {code} on {sim_date}.")
+        return WeatherSeriesOut(
+            plant_code=code,
+            sim_date=sim_date,
+            data_mode=blocks[0].data_mode,
+            weather_source=blocks[0].weather_source,
+            block_count=len(blocks),
+            blocks=[_weather_block_to_out(b) for b in blocks],
         )
 
 

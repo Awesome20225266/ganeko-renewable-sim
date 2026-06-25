@@ -1,0 +1,25 @@
+2026-06-25T23:49:32+0530 INFO    [app.main] API ready (scheduler_enabled=False)
+INFO:     127.0.0.1:60673 - "PUT /plants/HYBRID01/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60673 - "GET /dashboard/api/config/HYBRID01 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60673 - "PUT /plants/HYBRID01/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54392 - "GET /dashboard HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59274 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54392 - "GET /dashboard/api/today/HYBRID01 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54392 - "GET /dashboard/api/history/HYBRID01?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64135 - "GET /dashboard/api/config/HYBRID01 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64135 - "GET /dashboard/api/config/HYBRID01 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56023 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-25&mode=LIVE HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56023 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-25&mode=LIVE HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63270 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-26&mode=LIVE HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63270 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-26&mode=FORECAST HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63270 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-26&mode=FORECAST HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63270 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-26&mode=FORECAST HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63270 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-26&mode=FORECAST HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57459 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-24&mode=FORECAST HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57459 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-24&mode=HISTORICAL HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57459 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-24&mode=HISTORICAL HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57459 - "GET /dashboard/api/weather/HYBRID01?date=2026-06-24&mode=HISTORICAL HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53842 - "GET /dashboard/api/day/HYBRID01?date=2026-06-25&mode=HISTORICAL HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53842 - "GET /dashboard/api/day/HYBRID01?date=2026-06-25&mode=LIVE HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53046 - "GET /dashboard/api/config/HYBRID01 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52670 - "GET /dashboard/api/day/HYBRID01?date=2026-06-01&mode=LIVE HTTP/1.1" 200 OK

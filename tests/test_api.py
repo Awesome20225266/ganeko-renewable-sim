@@ -104,4 +104,51 @@ def test_key_listing_and_revocation(client):
 def test_dashboard_loads(client):
     r = client.get("/dashboard")
     assert r.status_code == 200
-    assert "Renewable Generation Dashboard" in r.text
+    assert "Renewable Generation Platform" in r.text
+
+
+def test_config_update_requires_admin(client):
+    # No key -> 401.
+    assert client.put("/plants/HYBRID01/config", json={"panel_tilt": 30}).status_code == 401
+    # Read key -> 403.
+    r = client.post(
+        "/admin/api-keys", headers=ADMIN,
+        json={"team": "x", "name": "r2", "scope": "read"},
+    )
+    rk = r.json()["api_key"]
+    assert client.put(
+        "/plants/HYBRID01/config", headers={"X-API-Key": rk}, json={"panel_tilt": 30}
+    ).status_code == 403
+
+
+def test_config_update_creates_new_version(client):
+    before = client.get("/plants/HYBRID01/config", headers=ADMIN).json()["config_version"]
+    r = client.put(
+        "/plants/HYBRID01/config", headers=ADMIN,
+        json={"solar_ac_mw": 170, "solar_dc_mw": 255, "latitude": 27.5},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["config_version"] == before + 1
+    assert body["solar_ac_mw"] == 170
+    assert body["latitude"] == 27.5
+    assert abs(body["dc_ac_ratio"] - 1.5) < 1e-6  # recomputed 255/170
+
+
+def test_weather_endpoint_auth_and_404(client):
+    # Auth required.
+    assert client.get("/plants/HYBRID01/weather?date=2020-01-01").status_code == 401
+    # Valid key, no data -> 404 (not 401).
+    assert client.get(
+        "/plants/HYBRID01/weather?date=2020-01-01", headers=ADMIN
+    ).status_code == 404
+
+
+def test_dashboard_open_feeds(client):
+    assert client.get("/dashboard/api/config/HYBRID01").status_code == 200
+    assert client.get(
+        "/dashboard/api/day/HYBRID01?date=2020-01-01&mode=HISTORICAL"
+    ).status_code == 200  # open feed returns empty blocks, not 404
+    assert client.get(
+        "/dashboard/api/weather/HYBRID01?date=2020-01-01&mode=LIVE"
+    ).status_code == 200

@@ -87,6 +87,14 @@ curl -X POST -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
 curl -H "X-API-Key: $KEY" $B/admin/api-keys
 curl -X DELETE -H "X-API-Key: $KEY" $B/admin/api-keys/<key_prefix>
 curl -X POST   -H "X-API-Key: $KEY" $B/admin/api-keys/<key_prefix>/rotate
+
+# Weather variables used for a date (read)
+curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/weather?date=2026-06-20&mode=HISTORICAL"
+
+# Update plant config — capacities / lat-long / timezone (ADMIN, creates a new version)
+curl -X PUT -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+     -d '{"solar_ac_mw":170,"solar_dc_mw":255,"latitude":27.5,"longitude":71.2,"timezone":"Asia/Kolkata"}' \
+     $B/plants/HYBRID01/config
 ```
 Unauthorized requests get **401** (missing/invalid/expired key) or **403** (read key on an
 admin endpoint). Each key has a per-minute rate limit (429 when exceeded); all calls are
@@ -160,14 +168,25 @@ Config is **versioned**: change assumptions by inserting a new `config_version` 
 
 ---
 
-## 6. Dashboard
+## 6. Dashboard (tabbed UI)
 
-`/dashboard` shows today's solar/wind/hybrid curves, current-block & cumulative generation,
-forecast for the remaining blocks, previous-days history, the weather variables used, and a
-data-quality badge. **Completed / live-estimated / forecast / interpolated** blocks are
-visually distinguished (solid vs dashed line; triangle markers for interpolated). It
-auto-refreshes every `DASHBOARD_REFRESH_SECONDS` (default 900). The dashboard reads
-open, read-only JSON feeds (no secrets, no internal IDs); the 8 business APIs stay key-protected.
+`/dashboard` is a self-contained tabbed front-end:
+- **Live** — today's solar/wind/hybrid curves, current-block & cumulative generation,
+  forecast for remaining blocks, weather used today, previous-days history, data-quality badge.
+  Completed / forecast / interpolated blocks are visually distinguished (solid vs dashed line;
+  triangle markers). Auto-refreshes every `DASHBOARD_REFRESH_SECONDS`.
+- **Explore by Date** — pick any date + mode, **Generate** (fetch live weather + simulate) or
+  **View** already-simulated data; shows summary KPIs + block chart.
+- **Weather** — view the normalized 15-min weather variables (GHI, POA, DNI, temp, cloud,
+  wind, gusts, pressure) for any date as a chart + table.
+- **Plant Config** — edit capacities, **latitude/longitude**, timezone, PR, losses, hub
+  height, cut-in/rated/cut-out, etc. Saving creates a new versioned config.
+- **API & Keys** — generate an API key for another team, **download a share file** with the
+  base URL + ready-to-run curl/Python snippets, list/revoke keys.
+
+Enter the **admin key** (top-right field, stored in your browser) to use the Config and
+API-Keys tabs and the Generate action. Viewing (Live/Explore/Weather) needs no key — those
+use open, read-only feeds that expose no secrets; the 8 business APIs stay key-protected.
 
 ---
 
@@ -200,6 +219,15 @@ timestamps, no negatives, solar = 0 at night, `solar_mw ≤ AC`, `wind_mw ≤ AC
 `total = solar + wind`. Failing checks mark the run `PARTIAL`/`FAILED` and are logged.
 
 See **HEALTH_REPORT.md** for the full system-health + simulation-realism validation.
+
+---
+
+## 8b. Deployment
+
+See **DEPLOYMENT.md** for going live: Docker-on-VM (with Caddy/Nginx HTTPS), a PaaS recipe
+(Render / Railway / Fly.io), managed Postgres, the env vars to set
+(`DATABASE_URL`, `ADMIN_BOOTSTRAP_KEY`, `CORS_ALLOW_ORIGINS`, …), how the scheduler should run
+as a single worker, scaling notes (the rate limiter is per-process), and a security checklist.
 
 ---
 
