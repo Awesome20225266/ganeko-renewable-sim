@@ -235,10 +235,15 @@ See **HEALTH_REPORT.md** for the full system-health + simulation-realism validat
 
 ## 8b. Deployment
 
-See **DEPLOYMENT.md** for going live: Docker-on-VM (with Caddy/Nginx HTTPS), a PaaS recipe
-(Render / Railway / Fly.io), managed Postgres, the env vars to set
-(`DATABASE_URL`, `ADMIN_BOOTSTRAP_KEY`, `CORS_ALLOW_ORIGINS`, …), how the scheduler should run
-as a single worker, scaling notes (the rate limiter is per-process), and a security checklist.
+**Recommended: Supabase (database) + Render (app)** — see **DEPLOYMENT.md → Option B0** for the
+~10-minute walkthrough (create a Supabase Postgres, grab the pooler connection string with
+`?sslmode=require`, push to GitHub, deploy the bundled `render.yaml` Blueprint). The full
+Postgres path (migrate → seed → simulate → serve) has been validated end-to-end.
+
+DEPLOYMENT.md also covers Docker-on-VM (with Caddy/Nginx HTTPS), Railway/Fly, the instant
+Cloudflare quick-tunnel, the env vars to set (`DATABASE_URL`, `ADMIN_BOOTSTRAP_KEY`,
+`CORS_ALLOW_ORIGINS`, …), running the scheduler as a single worker, scaling notes (the rate
+limiter is per-process), and a security checklist.
 
 ---
 

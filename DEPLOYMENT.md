@@ -70,34 +70,56 @@ uses whatever origin you open it on, so it will contain the public URL automatic
 
 ---
 
-## Option B0 — Render in ~10 min using the bundled `render.yaml` (recommended)
+## Option B0 — Supabase (database) + Render (app)  ← recommended, ~10 min
 
-This repo ships a ready Blueprint (`render.yaml`): one free Docker web service (API +
-dashboard + in-process scheduler) + a free Postgres database. Migrations and the seed run
-automatically on boot.
+Database on **Supabase** (managed Postgres, always-on free tier); the FastAPI app
+(REST API + dashboard + shareable API keys + self-refresh) on **Render** via the bundled
+`render.yaml`. Migrations + idempotent seed run automatically on boot.
 
-1. **Put the code on GitHub** (Render deploys from a Git repo). From the project folder:
-   ```bash
-   git init -b main            # if not already a repo
-   git add -A && git commit -m "Renewable simulation platform"
-   # create an EMPTY repo on github.com first, then:
-   git remote add origin https://github.com/<you>/<repo>.git
-   git push -u origin main
+### Step 1 — Supabase database
+1. Create a project at **https://supabase.com** (free). Pick a region near your users.
+2. In the project: **Connect** (top bar) → **Connection string** → **Session pooler**
+   (also labelled "Shared pooler"). It looks like:
    ```
-2. Go to **https://dashboard.render.com → New + → Blueprint**.
-3. Connect your GitHub and pick the repo. Render reads `render.yaml` and shows a web
-   service + a Postgres database — click **Apply**.
-4. Wait for the build (a few minutes). Render gives you a public HTTPS URL like
-   `https://renewable-sim.onrender.com`.
-5. Open `…/dashboard`. The admin key is auto-generated (`ADMIN_BOOTSTRAP_KEY`); find it
-   under the service's **Environment** tab if you need it for the key-protected APIs.
+   postgresql://postgres.<ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres
+   ```
+   Use the **pooler** host (it's IPv4 — Render can reach it). Replace `<PASSWORD>` with
+   your DB password, and **append `?sslmode=require`**:
+   ```
+   postgresql://postgres.<ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+   ```
+   That whole string is your `DATABASE_URL`. (No tables to create by hand — the app's
+   migrations build the schema on first boot.)
 
-Free-tier caveats: the web service sleeps after ~15 min idle (first request then ~30s,
-and the in-process scheduler pauses while asleep); free Postgres is time-limited. For
-always-on + a dedicated scheduler worker, switch to a paid plan and add a `type: worker`
-service running `bash scripts/entrypoint.sh scheduler` (see the comment in `render.yaml`).
+### Step 2 — Push the code to GitHub
+```bash
+git add -A && git commit -m "Renewable simulation platform"
+# create an EMPTY repo on github.com first, then:
+git remote add origin https://github.com/<you>/<repo>.git
+git push -u origin master
+```
 
-> Railway/Fly use the same Docker image — see Option B below for the per-platform recipe.
+### Step 3 — Deploy on Render
+1. **https://dashboard.render.com → New + → Blueprint**, connect GitHub, pick the repo.
+2. Render reads `render.yaml` and shows one web service. It prompts for **`DATABASE_URL`**
+   — paste the Supabase string from Step 1. Click **Apply**.
+3. Wait for the build (~3 min). You get a public URL like `https://renewable-sim.onrender.com`.
+4. Open `…/dashboard`. The admin key is auto-generated — find it under the service's
+   **Environment → ADMIN_BOOTSTRAP_KEY** if you need it for the key-protected APIs.
+
+Now your shareable API base URL is the Render URL; keys minted in the **API & Keys** tab
+work against it, and `/current` / `/live` auto-refresh every 15 min on access.
+
+Free-tier caveats: the Render web service sleeps after ~15 min idle (first request then
+~30s; the in-process scheduler pauses while asleep — but `/current`/`/live` self-refresh
+on access). Supabase free pauses a project after ~1 week of zero activity (just reopen it).
+For always-on + a dedicated scheduler worker, use a paid Render plan and add a
+`type: worker` service running `bash scripts/entrypoint.sh scheduler` with the same
+`DATABASE_URL` (see the comment in `render.yaml`).
+
+> Validated: the full migrate → seed → simulate → serve chain was tested against real
+> Postgres (night-solar fix and all) before publishing these steps.
+> Railway/Fly use the same Docker image + Supabase URL — see Option B below.
 
 ## Option B — PaaS (Render / Railway / Fly.io)
 

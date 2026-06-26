@@ -1,19 +1,14 @@
-# Render.com Blueprint — deploy with: New + → Blueprint → connect this repo.
-# Free-tier friendly: one Docker web service (runs the API + dashboard + in-process
-# scheduler) plus a free Postgres database. No paid background worker required.
+# Render.com Blueprint — FastAPI app (API + dashboard + in-process scheduler) on Render,
+# with the database on Supabase (managed Postgres).
 #
-# Notes:
-#  * Free web services sleep after ~15 min idle; the first request then takes ~30s and
-#    the in-process scheduler pauses while asleep (fine for a demo). For always-on +
-#    a dedicated scheduler worker, move to a paid plan and add a `type: worker` service
-#    running `bash scripts/entrypoint.sh scheduler`.
-#  * Migrations + idempotent seed run automatically on boot (see scripts/entrypoint.sh).
-databases:
-  - name: renewable-db
-    plan: free
-    databaseName: renewable
-    user: renew
-
+# Deploy: New + → Blueprint → connect this repo → Apply. Render will prompt for the
+# DATABASE_URL (paste your Supabase connection string — see DEPLOYMENT.md §Supabase).
+#
+# Free-tier note: the web service sleeps after ~15 min idle; the first request then takes
+# ~30s and the in-process scheduler pauses while asleep. The /current & /live endpoints
+# self-refresh on access, so a shared API key still returns data <=15 min old once hit.
+# For always-on + a dedicated scheduler worker, use a paid plan and add a `type: worker`
+# service running `bash scripts/entrypoint.sh scheduler` (same DATABASE_URL).
 services:
   - type: web
     name: renewable-sim
@@ -24,26 +19,24 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: renewable-db
-          property: connectionString
-      - key: ADMIN_BOOTSTRAP_KEY      # auto-generated strong admin key
+      - key: DATABASE_URL          # paste your Supabase pooler URL (incl. ?sslmode=require)
+        sync: false
+      - key: ADMIN_BOOTSTRAP_KEY   # auto-generated strong admin key
         generateValue: true
-      - key: SCHEDULER_ENABLED        # in-process scheduler (free single service)
+      - key: SCHEDULER_ENABLED     # in-process scheduler (free single service)
         value: "true"
-      - key: DASHBOARD_CONSOLE_WRITE  # keyless console (set false to lock down)
+      - key: DASHBOARD_CONSOLE_WRITE  # keyless console; set false to lock down public access
         value: "true"
       - key: CORS_ALLOW_ORIGINS
         value: "*"
       - key: PLANT_CODE
         value: HYBRID01
       - key: PLANT_NAME
-        value: Jaisalmer Hybrid Park
+        value: Ganeko Two Energy Private Limited
       - key: PLANT_LAT
-        value: "26.9124"
+        value: "17.60"
       - key: PLANT_LON
-        value: "70.9026"
+        value: "76.36"
       - key: PLANT_TZ
         value: Asia/Kolkata
       - key: LIVE_REFRESH_MINUTES
