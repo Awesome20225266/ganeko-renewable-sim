@@ -77,7 +77,7 @@
       <div class="card kpi"><div class="v"><span id="liveQ" class="badge ok">—</span></div><div class="l">Data quality</div></div>
     </div>
     <div class="card" style="margin-bottom:16px;">
-      <h2 id="liveHd">Today — Solar / Wind / Hybrid (15-min blocks)</h2>
+      <h2 id="liveHd">Today — Solar / Wind / Hybrid (15-min blocks) <span id="liveUpdated" style="font-size:0.7rem;font-weight:400;color:#90a0b8;margin-left:12px;"></span></h2>
       <div class="chartbox"><canvas id="genChart"></canvas></div>
       <div class="legend">
         <span class="chip"><span class="sw" style="border-color:var(--solar)"></span>Solar</span>
@@ -256,6 +256,7 @@ async function loadLive() {
   document.getElementById('kBlock').textContent=cur+' / 96';
   const interp = d.blocks.some(b=>b.interpolated);
   const q=document.getElementById('liveQ'); q.className='badge '+(interp?'partial':'ok'); q.textContent=interp?'PARTIAL':'OK';
+  const upd=document.getElementById('liveUpdated'); if(upd){ const t=new Date(); upd.textContent=`↻ updated ${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}:${t.getSeconds().toString().padStart(2,'0')}`; }
   const labels=d.blocks.map(b=>b.time);
   const dash=ctx=>ctx.p0DataIndex>=cur-1?[6,4]:undefined;
   const mk=(k,col)=>({label:k,data:d.blocks.map(b=>b[k]),borderColor:col,backgroundColor:col,tension:.35,borderWidth:2,

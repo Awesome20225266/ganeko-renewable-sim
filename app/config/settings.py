@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     LIVE_REFRESH_MINUTES: int = 15
 
     # Dashboard
-    DASHBOARD_REFRESH_SECONDS: int = 900
+    DASHBOARD_REFRESH_SECONDS: int = 60
     # The dashboard console performs config edits / key generation / simulation runs
     # WITHOUT an API key (it is the trusted same-origin admin console). Keep this true
     # for local/trusted use; set false in production to disable those write actions and
