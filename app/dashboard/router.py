@@ -9,22 +9,36 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select
 
 from app.api.repository import (
     get_blocks,
     get_summaries_range,
     get_weather_blocks,
 )
+from app.api.schemas import PlantConfigUpdate
 from app.config.settings import get_settings
 from app.db.base import session_scope
-from app.db.models import WeatherBlock
-from app.simulate import load_active_config
+from app.db.models import ApiKey, WeatherBlock
+from app.services import create_api_key, create_config_version, revoke_api_key
+from app.simulate import load_active_config, run_simulation
+from app.weather.client import DataMode
 
 router = APIRouter(tags=["dashboard"])
 
 _TEMPLATE = Path(__file__).parent / "templates" / "index.html"
+
+
+def _require_console_write() -> None:
+    """Gate for the unauthenticated console write actions (production safety valve)."""
+    if not get_settings().DASHBOARD_CONSOLE_WRITE:
+        raise HTTPException(
+            403,
+            "Dashboard console writes are disabled (DASHBOARD_CONSOLE_WRITE=false). "
+            "Use the key-protected /plants and /admin APIs instead.",
+        )
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -219,6 +233,106 @@ def dashboard_weather(code: str, date: str, mode: str = "LIVE"):
                 for w in blocks
             ],
         }
+
+
+# --------------------------------------------------------------------------- #
+# Trusted same-origin console actions (no API key — the dashboard IS the admin
+# console). The public /plants & /admin APIs remain key-protected for external
+# consumers. In production, place the dashboard behind your own network/auth.
+# --------------------------------------------------------------------------- #
+@router.post("/dashboard/api/generate/{code}")
+async def dashboard_generate(code: str, date: str, mode: str = "HISTORICAL"):
+    """Fetch live weather for a date + run the simulation (Explore tab 'Generate')."""
+    _require_console_write()
+    from datetime import date as _date
+
+    d = _date.fromisoformat(date)
+    try:
+        m = DataMode(mode.upper())
+    except ValueError:
+        raise HTTPException(400, f"Invalid mode '{mode}'") from None
+    try:
+        summary = await run_simulation(code, d, m, triggered_by="manual", force_refetch=True)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from None
+    return {
+        "date": d.isoformat(),
+        "mode": summary.mode,
+        "data_label": summary.data_label,
+        "quality_status": summary.quality_status,
+        "blocks_written": summary.blocks_written,
+        "total_mwh": round(summary.total_mwh, 2),
+        "solar_mwh": round(summary.solar_mwh, 2),
+        "wind_mwh": round(summary.wind_mwh, 2),
+    }
+
+
+@router.put("/dashboard/api/config/{code}")
+def dashboard_update_config(code: str, body: PlantConfigUpdate):
+    """Save a new plant-config version (Config tab 'Save'). No key needed."""
+    _require_console_write()
+    fields = body.model_dump(exclude_unset=True, exclude_none=True)
+    with session_scope() as db:
+        try:
+            cfg = create_config_version(db, code, fields)
+        except ValueError:
+            raise HTTPException(404, f"Unknown plant '{code}'") from None
+        return {"plant_code": code, "config_version": cfg.config_version, "saved": True}
+
+
+@router.get("/dashboard/api/keys")
+def dashboard_list_keys():
+    with session_scope() as db:
+        rows = list(db.scalars(select(ApiKey).order_by(ApiKey.created_at.desc())))
+        return {
+            "count": len(rows),
+            "keys": [
+                {
+                    "key_prefix": k.key_prefix,
+                    "team": k.team,
+                    "name": k.name,
+                    "scope": k.scope,
+                    "is_active": k.is_active,
+                    "rate_limit_per_min": k.rate_limit_per_min,
+                    "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+                }
+                for k in rows
+            ],
+        }
+
+
+@router.post("/dashboard/api/keys")
+def dashboard_create_key(payload: dict = Body(...)):
+    """Generate an API key for another user/team (API & Keys tab)."""
+    _require_console_write()
+    with session_scope() as db:
+        raw, row = create_api_key(
+            db,
+            team=payload.get("team", "external"),
+            name=payload.get("name", "consumer"),
+            scope=payload.get("scope", "read"),
+            rate_limit_per_min=int(payload.get("rate_limit_per_min", 120)),
+            expires_in_days=payload.get("expires_in_days"),
+        )
+        return {
+            "api_key": raw,
+            "key_prefix": row.key_prefix,
+            "team": row.team,
+            "name": row.name,
+            "scope": row.scope,
+            "rate_limit_per_min": row.rate_limit_per_min,
+        }
+
+
+@router.delete("/dashboard/api/keys/{prefix}")
+def dashboard_revoke_key(prefix: str):
+    _require_console_write()
+    with session_scope() as db:
+        try:
+            n = revoke_api_key(db, prefix)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return {"message": f"Revoked {n} key(s) with prefix '{prefix}'."}
 
 
 @router.get("/dashboard/api/history/{code}")

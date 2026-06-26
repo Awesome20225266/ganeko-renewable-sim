@@ -90,6 +90,36 @@ def test_hybrid_totals_reconcile(spec, synthetic_day):
         assert r.solar_mw >= 0 and r.wind_mw >= 0
 
 
+def test_realism_texture_deterministic_and_bounded(spec, synthetic_day):
+    import dataclasses
+
+    from app.quality import check_day
+
+    # Cloudy + gusty version of the synthetic day to activate texture.
+    cloudy = [
+        dataclasses.replace(b, cloud_cover=70.0, wind_gusts_10m=(b.wind_speed_100m or 0) * 1.4)
+        for b in synthetic_day
+    ]
+    a = simulate_day(spec, cloudy, texture=True)
+    b = simulate_day(spec, cloudy, texture=True)
+    plain = simulate_day(spec, cloudy, texture=False)
+
+    # Deterministic: identical across runs.
+    assert [r.total_mw for r in a] == [r.total_mw for r in b]
+    # Adds variability vs the smooth physics-only result.
+    assert any(abs(x.total_mw - y.total_mw) > 1e-6 for x, y in zip(a, plain, strict=False))
+    # Invariants still hold with texture on.
+    report = check_day(spec, a)
+    assert report.status in ("OK", "PARTIAL")
+    assert not report.issues
+    for r in a:
+        assert r.solar_mw >= 0 and r.wind_mw >= 0
+        assert r.solar_mw <= spec.solar_ac_mw + 1e-9
+        assert r.wind_mw <= spec.wind_ac_mw + 1e-9
+        if r.solar_status == "NIGHT":
+            assert r.solar_mw == 0.0
+
+
 def test_hybrid_solar_bell_shape(spec, synthetic_day):
     results = simulate_day(spec, synthetic_day)
     solar = [r.solar_mw for r in results]

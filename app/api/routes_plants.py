@@ -5,7 +5,6 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 
 from app.api.deps import AuthContext, require_admin, require_read
 from app.api.repository import (
@@ -26,7 +25,8 @@ from app.api.schemas import (
     WeatherSeriesOut,
 )
 from app.db.base import session_scope
-from app.db.models import DailySummary, GenerationBlock, Plant, PlantConfig, SimulationVersion
+from app.db.models import DailySummary, GenerationBlock, PlantConfig, SimulationVersion
+from app.services import create_config_version
 from app.simulate import load_active_config
 
 router = APIRouter(prefix="/plants", tags=["plants"])
@@ -156,35 +156,9 @@ def update_plant_config(
     fields = body.model_dump(exclude_unset=True, exclude_none=True)
     with session_scope() as db:
         try:
-            cur = load_active_config(db, code)
+            new_cfg = create_config_version(db, code, fields)
         except ValueError:
             raise HTTPException(404, f"Unknown plant '{code}'") from None
-        plant = db.scalar(select(Plant).where(Plant.plant_code == code))
-        new_version = cur.config_version + 1
-
-        # Carry forward all current values, then apply overrides.
-        carried = {
-            c.name: getattr(cur, c.name)
-            for c in PlantConfig.__table__.columns
-            if c.name not in ("id", "plant_id", "config_version", "is_active", "created_at")
-        }
-        carried.update(fields)
-        # Keep DC/AC ratio consistent when capacities change.
-        if carried.get("solar_ac_mw"):
-            carried["dc_ac_ratio"] = round(carried["solar_dc_mw"] / carried["solar_ac_mw"], 4)
-
-        # Deactivate previous active configs.
-        db.query(PlantConfig).filter(
-            PlantConfig.plant_code == code, PlantConfig.is_active.is_(True)
-        ).update({PlantConfig.is_active: False}, synchronize_session=False)
-
-        new_cfg = PlantConfig(
-            plant_id=plant.id, config_version=new_version, is_active=True, **carried
-        )
-        db.add(new_cfg)
-        if plant:
-            plant.active_config_version = new_version
-        db.flush()
         ver = db.query(SimulationVersion).order_by(SimulationVersion.created_at.desc()).first()
         return _config_to_out(new_cfg, ver.assumptions if ver else {})
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.engines.spec import PlantSpec
+from app.engines.texture import solar_texture_factor
 from app.weather.normalize import NormalizedBlock
 
 NOCT_C = 45.0  # Nominal Operating Cell Temperature
@@ -24,7 +25,9 @@ class SolarResult:
     t_cell: float
 
 
-def simulate_solar_block(spec: PlantSpec, block: NormalizedBlock) -> SolarResult:
+def simulate_solar_block(
+    spec: PlantSpec, block: NormalizedBlock, texture: bool = False
+) -> SolarResult:
     block_hours = spec.block_minutes / 60.0
     poa = float(block.poa or 0.0)
     t_amb = block.temperature_2m if block.temperature_2m is not None else 25.0
@@ -47,6 +50,9 @@ def simulate_solar_block(spec: PlantSpec, block: NormalizedBlock) -> SolarResult
         * temp_factor
         * (1.0 - spec.solar_loss_factor)
     )
+    # Cloud-correlated flicker (applied to DC so the inverter still clips the peak).
+    if texture:
+        dc_mw *= solar_texture_factor(block.block_start, block.cloud_cover)
     dc_mw = max(0.0, dc_mw)
 
     # Inverter clipping at AC capacity.

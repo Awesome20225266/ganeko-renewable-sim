@@ -152,3 +152,38 @@ def test_dashboard_open_feeds(client):
     assert client.get(
         "/dashboard/api/weather/HYBRID01?date=2020-01-01&mode=LIVE"
     ).status_code == 200
+
+
+def test_dashboard_config_update_no_key(client):
+    """The dashboard console edits config WITHOUT an API key (trusted same-origin)."""
+    before = client.get("/dashboard/api/config/HYBRID01").json()["config_version"]
+    r = client.put(
+        "/dashboard/api/config/HYBRID01",
+        json={"solar_ac_mw": 165, "solar_dc_mw": 247.5, "latitude": 26.8},
+    )
+    assert r.status_code == 200
+    assert r.json()["config_version"] == before + 1
+    after = client.get("/dashboard/api/config/HYBRID01").json()
+    assert after["solar_ac_mw"] == 165 and after["latitude"] == 26.8
+
+
+def test_dashboard_key_lifecycle_no_admin_key(client):
+    """Generate / list / revoke API keys from the console without entering a key."""
+    r = client.post(
+        "/dashboard/api/keys",
+        json={"team": "ext", "name": "consumer", "scope": "read", "rate_limit_per_min": 60},
+    )
+    assert r.status_code == 200
+    raw = r.json()["api_key"]
+    prefix = r.json()["key_prefix"]
+    # The minted key actually works against the protected API.
+    assert client.get(
+        "/plants/HYBRID01/config", headers={"X-API-Key": raw}
+    ).status_code == 200
+    # It shows up in the console listing and can be revoked.
+    assert any(k["key_prefix"] == prefix for k in client.get("/dashboard/api/keys").json()["keys"])
+    assert client.delete(f"/dashboard/api/keys/{prefix}").status_code == 200
+    # Revoked key no longer authorizes.
+    assert client.get(
+        "/plants/HYBRID01/config", headers={"X-API-Key": raw}
+    ).status_code == 401

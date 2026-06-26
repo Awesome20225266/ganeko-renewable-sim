@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from app.engines.spec import PlantSpec
+from app.engines.texture import wind_texture_factor
 from app.weather.normalize import NormalizedBlock
 
 WIND_SHEAR_ALPHA = 0.143  # power-law exponent (~1/7), open terrain
@@ -70,7 +71,9 @@ def _air_density_factor(block: NormalizedBlock) -> float:
     return rho / RHO0
 
 
-def simulate_wind_block(spec: PlantSpec, block: NormalizedBlock) -> WindResult:
+def simulate_wind_block(
+    spec: PlantSpec, block: NormalizedBlock, texture: bool = False
+) -> WindResult:
     block_hours = spec.block_minutes / 60.0
     v_hub = _hub_speed(spec, block)
     if v_hub is None:
@@ -89,6 +92,11 @@ def simulate_wind_block(spec: PlantSpec, block: NormalizedBlock) -> WindResult:
         power_mw *= _air_density_factor(block)
 
     power_mw *= 1.0 - spec.wind_loss_factor
+    # Turbulence-driven variability (gust factor); capped at AC below.
+    if texture:
+        power_mw *= wind_texture_factor(
+            block.block_start, block.wind_speed_10m, block.wind_gusts_10m
+        )
     power_mw = max(0.0, power_mw)
 
     if power_mw > spec.wind_ac_mw + 1e-9:

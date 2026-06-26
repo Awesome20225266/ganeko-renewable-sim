@@ -53,8 +53,7 @@
     <div class="sub" id="hdrSub">solar / wind / hybrid — live Open-Meteo</div>
   </div>
   <div class="ctrls">
-    <label class="fld">Plant<input id="plantCode" value="__DEFAULT_PLANT__" style="width:110px"/></label>
-    <label class="fld">Admin key (for Config / API keys)<input id="adminKey" type="password" placeholder="X-API-Key" style="width:200px"/></label>
+    <label class="fld">Plant<input id="plantCode" value="__DEFAULT_PLANT__" style="width:130px"/></label>
   </div>
 </header>
 
@@ -104,7 +103,7 @@
         <button class="ghost" onclick="exploreGenerate()">Generate (fetch &amp; simulate)</button>
         <span id="expLabel" class="badge ok" style="display:none"></span>
       </div>
-      <div class="sub" style="margin-top:8px">“Generate” fetches live Open-Meteo data for the date and runs the simulation (needs admin key). “View” shows already-simulated data.</div>
+      <div class="sub" style="margin-top:8px">“Generate” fetches live Open-Meteo data for the date and runs the simulation. “View” shows already-simulated data.</div>
     </div>
     <div class="grid kpis" id="expKpis" style="display:none">
       <div class="card kpi"><div class="v" id="eSolar">—</div><div class="l">Solar MWh</div></div>
@@ -137,7 +136,7 @@
   <section id="tab-config" class="tab">
     <div class="card">
       <h2>Plant configuration <span class="sub" id="cfgVer"></span></h2>
-      <div class="sub" style="margin-bottom:14px">Editing capacities / location creates a new config version (history preserved). Requires the admin key. After saving, use “Generate” on the Explore tab to regenerate outputs.</div>
+      <div class="sub" style="margin-bottom:14px">Editing capacities / location creates a new config version (history preserved). After saving, use “Generate” on the Explore tab to regenerate outputs under the new assumptions.</div>
       <div class="formgrid" id="cfgForm">
         <label class="fld">Plant name<input id="c_plant_name"/></label>
         <label class="fld">Latitude<input id="c_latitude" type="number" step="0.0001"/></label>
@@ -171,7 +170,7 @@
     <div class="grid row2">
       <div class="card">
         <h2>Generate API key</h2>
-        <div class="sub" style="margin-bottom:12px">Mint a key for another user/team, then download a share file with ready-to-run examples. Requires admin key.</div>
+        <div class="sub" style="margin-bottom:12px">Mint a key for another user/team, then download a share file with ready-to-run examples. The recipient uses this key; the dashboard itself needs none.</div>
         <div class="formgrid">
           <label class="fld">Team<input id="k_team" value="external"/></label>
           <label class="fld">Name<input id="k_name" value="data-consumer"/></label>
@@ -209,12 +208,8 @@ const ORIGIN = window.location.origin;
 const charts = {};
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 function plant(){ return document.getElementById('plantCode').value.trim() || '__DEFAULT_PLANT__'; }
-function adminKey(){ return document.getElementById('adminKey').value.trim() || localStorage.getItem('adminKey') || ''; }
 function toast(msg, kind='good'){ const t=document.getElementById('toast'); t.className='toast '+kind; t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', 4500); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
-
-document.getElementById('adminKey').value = localStorage.getItem('adminKey') || '';
-document.getElementById('adminKey').addEventListener('change', e => localStorage.setItem('adminKey', e.target.value.trim()));
 
 // ---- tabs ----
 document.querySelectorAll('#nav a').forEach(a => a.onclick = () => {
@@ -224,7 +219,7 @@ document.querySelectorAll('#nav a').forEach(a => a.onclick = () => {
   const id = a.dataset.tab;
   document.getElementById('tab-'+id).classList.add('active');
   if (id==='config') loadConfig();
-  if (id==='apikeys'){ listKeys(); renderExamples(); }
+  if (id==='apikeys'){ listKeys(); renderExamples(); }  // eslint-disable-line
   if (id==='explore' && !document.getElementById('expDate').value) document.getElementById('expDate').value = todayISO();
   if (id==='weather' && !document.getElementById('wxDate').value) document.getElementById('wxDate').value = todayISO();
 });
@@ -240,6 +235,16 @@ async function loadLive() {
   let d;
   try { const r = await fetch(`/dashboard/api/today/${plant()}`); if(!r.ok) throw new Error((await r.json()).detail); d = await r.json(); }
   catch(e){ document.getElementById('hdrSub').textContent='Error: '+e.message; return; }
+  // Self-heal: if today's simulation hasn't been generated yet (e.g. the day just
+  // rolled over and the scheduler hasn't run), generate it once automatically.
+  if ((!d.blocks || d.blocks.length===0) && !window._autoGen){
+    window._autoGen = true;
+    document.getElementById('hdrSub').textContent = 'Generating today’s live simulation from Open-Meteo…';
+    try{
+      await fetch(`/dashboard/api/generate/${plant()}?date=${d.date}&mode=LIVE`,{method:'POST'});
+      const r2 = await fetch(`/dashboard/api/today/${plant()}`); d = await r2.json();
+    }catch(e){ /* fall through to render whatever we have */ }
+  }
   const cur = d.current_block_no;
   document.getElementById('hdrTitle').textContent = d.plant_name;
   document.getElementById('hdrSub').textContent = `${d.plant_code} · ${d.date} · ${d.timezone} · Solar ${d.solar_ac_mw} MW + Wind ${d.wind_ac_mw} MW`;
@@ -292,12 +297,11 @@ async function exploreView(){
 async function exploreGenerate(){
   const d=document.getElementById('expDate').value, m=document.getElementById('expMode').value;
   if(!d){ toast('Pick a date','err'); return; }
-  if(!adminKey()){ toast('Enter the admin key (top right) to generate','err'); return; }
-  toast('Fetching weather & simulating '+d+' …');
+  toast('Fetching weather & simulating '+d+' … (a few seconds)');
   try{
-    const r=await fetch(`/admin/reprocess`,{method:'POST',headers:{'X-API-Key':adminKey(),'Content-Type':'application/json'},body:JSON.stringify({plant_code:plant(),dates:[d],mode:m})});
+    const r=await fetch(`/dashboard/api/generate/${plant()}?date=${d}&mode=${m}`,{method:'POST'});
     if(!r.ok) throw new Error((await r.json()).detail||r.status);
-    const j=await r.json(); toast(`Generated ${d}: ${j.results[0].data_label}, ${j.results[0].total_mwh} MWh`);
+    const j=await r.json(); toast(`Generated ${d}: ${j.data_label}, ${j.total_mwh} MWh`);
     exploreView();
   }catch(e){ toast('Generate failed: '+e.message,'err'); }
 }
@@ -331,14 +335,13 @@ async function loadConfig(){
   CFG_FIELDS.forEach(k=>{ const el=document.getElementById('c_'+k); if(!el) return; el.value = (typeof c[k]==='boolean')? String(c[k]) : c[k]; });
 }
 async function saveConfig(){
-  if(!adminKey()){ toast('Enter the admin key to save config','err'); return; }
   const body={};
   CFG_FIELDS.forEach(k=>{ const el=document.getElementById('c_'+k); if(!el) return; let v=el.value;
     if(el.type==='number') v=parseFloat(v);
     if(k==='use_global_tilted_irradiance'||k==='air_density_correction') v=(el.value==='true');
     body[k]=v; });
   try{
-    const r=await fetch(`/plants/${plant()}/config`,{method:'PUT',headers:{'X-API-Key':adminKey(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r=await fetch(`/dashboard/api/config/${plant()}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok) throw new Error((await r.json()).detail||r.status);
     const j=await r.json(); toast('Saved config version '+j.config_version+'. Regenerate dates on Explore to apply.');
     loadConfig();
@@ -347,11 +350,11 @@ async function saveConfig(){
 
 // ---------------- API & KEYS ----------------
 async function listKeys(){
-  if(!adminKey()){ document.querySelector('#keyTable tbody').innerHTML='<tr><td colspan=6 class=muted>Enter admin key to list keys</td></tr>'; return; }
   try{
-    const r=await fetch(`/admin/api-keys`,{headers:{'X-API-Key':adminKey()}});
+    const r=await fetch(`/dashboard/api/keys`);
     if(!r.ok) throw new Error((await r.json()).detail||r.status);
     const j=await r.json(); const tb=document.querySelector('#keyTable tbody'); tb.innerHTML='';
+    if(!j.keys.length){ tb.innerHTML='<tr><td colspan=6 class=muted>No keys yet — generate one</td></tr>'; return; }
     j.keys.forEach(k=>{ const tr=document.createElement('tr'); tr.innerHTML=
       `<td class=keyrow>${k.key_prefix}…</td><td>${k.team}</td><td>${k.scope}</td><td>${k.is_active?'✅':'❌'}</td><td>${k.rate_limit_per_min}</td>`+
       `<td>${k.is_active?`<button class=ghost style="padding:3px 8px" onclick="revokeKey('${k.key_prefix}')">revoke</button>`:''}</td>`;
@@ -359,20 +362,20 @@ async function listKeys(){
   }catch(e){ toast('List failed: '+e.message,'err'); }
 }
 async function createKey(){
-  if(!adminKey()){ toast('Enter the admin key to generate','err'); return; }
   const body={team:k_team.value,name:k_name.value,scope:k_scope.value,rate_limit_per_min:parseInt(k_rate.value||'120')};
   if(k_exp.value) body.expires_in_days=parseInt(k_exp.value);
   try{
-    const r=await fetch(`/admin/api-keys`,{method:'POST',headers:{'X-API-Key':adminKey(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r=await fetch(`/dashboard/api/keys`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok) throw new Error((await r.json()).detail||r.status);
     const j=await r.json(); window._newKey=j.api_key;
     document.getElementById('newKey').textContent=j.api_key;
     document.getElementById('newKeyBox').style.display='block';
+    renderExamples();
     toast('Key generated for '+j.team+' / '+j.name); listKeys();
   }catch(e){ toast('Generate failed: '+e.message,'err'); }
 }
-async function revokeKey(p){ if(!adminKey()){toast('Admin key required','err');return;}
-  try{ const r=await fetch(`/admin/api-keys/${p}`,{method:'DELETE',headers:{'X-API-Key':adminKey()}}); const j=await r.json(); toast(j.message||j.detail); listKeys(); }
+async function revokeKey(p){
+  try{ const r=await fetch(`/dashboard/api/keys/${p}`,{method:'DELETE'}); const j=await r.json(); toast(j.message||j.detail); listKeys(); }
   catch(e){ toast('Revoke failed','err'); } }
 function shareText(key){
   const c=plant();

@@ -30,9 +30,11 @@ class BlockResult:
     data_quality_status: str
 
 
-def simulate_block(spec: PlantSpec, block: NormalizedBlock) -> BlockResult:
-    solar = simulate_solar_block(spec, block)
-    wind = simulate_wind_block(spec, block)
+def simulate_block(
+    spec: PlantSpec, block: NormalizedBlock, texture: bool = False
+) -> BlockResult:
+    solar = simulate_solar_block(spec, block, texture=texture)
+    wind = simulate_wind_block(spec, block, texture=texture)
 
     total_mw = solar.ac_mw + wind.mw
     total_mwh = solar.mwh + wind.mwh
@@ -62,5 +64,7 @@ def simulate_block(spec: PlantSpec, block: NormalizedBlock) -> BlockResult:
     )
 
 
-def simulate_day(spec: PlantSpec, blocks: list[NormalizedBlock]) -> list[BlockResult]:
-    return [simulate_block(spec, b) for b in blocks]
+def simulate_day(
+    spec: PlantSpec, blocks: list[NormalizedBlock], texture: bool = False
+) -> list[BlockResult]:
+    return [simulate_block(spec, b, texture=texture) for b in blocks]

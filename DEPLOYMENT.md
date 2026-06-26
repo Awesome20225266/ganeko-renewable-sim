@@ -133,6 +133,11 @@ Trade-off: don't scale this service to >1 replica, or the scheduler runs N times
 - [ ] HTTPS enforced (reverse proxy / PaaS).
 - [ ] Issue **read-scoped** keys to consumers; keep admin keys internal.
 - [ ] Postgres not publicly exposed (or firewalled to the app only).
-- [ ] Dashboard data feeds are read-only and expose no secrets, but if the data itself is
-      sensitive, put the dashboard behind your own auth/proxy.
+- [ ] **Dashboard console is unauthenticated by design** — its write actions (generate
+      simulations, edit config, mint/revoke API keys) need no key. For a public deployment
+      either (a) put `/dashboard` behind your own network/SSO/proxy, or (b) set
+      `DASHBOARD_CONSOLE_WRITE=false` so the console becomes read-only and all changes must
+      go through the key-protected `/plants` & `/admin` APIs.
+- [ ] Read-only dashboard feeds expose no secrets/IDs; if the generation data itself is
+      sensitive, gate the whole dashboard behind your auth/proxy.
 ```

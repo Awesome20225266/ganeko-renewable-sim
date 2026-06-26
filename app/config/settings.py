@@ -41,6 +41,11 @@ class Settings(BaseSettings):
 
     # Dashboard
     DASHBOARD_REFRESH_SECONDS: int = 900
+    # The dashboard console performs config edits / key generation / simulation runs
+    # WITHOUT an API key (it is the trusted same-origin admin console). Keep this true
+    # for local/trusted use; set false in production to disable those write actions and
+    # require the key-protected /plants & /admin APIs instead. Read-only feeds stay on.
+    DASHBOARD_CONSOLE_WRITE: bool = True
 
     # API / security
     DEFAULT_RATE_LIMIT_PER_MIN: int = 120
@@ -53,6 +58,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     SIMULATION_VERSION: str = "v1.0.0"
     MODEL_ASSUMPTION_VERSION: str = "v1.0.0"
+    # Adds deterministic, weather-correlated block-to-block variability (cloud-driven
+    # solar flicker, wind turbulence) so output resembles real metered plant data.
+    # Reproducible (seeded by block timestamp) and bounded (caps/night/no-negatives hold).
+    REALISM_TEXTURE: bool = True
 
 
 @lru_cache

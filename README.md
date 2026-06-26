@@ -184,9 +184,15 @@ Config is **versioned**: change assumptions by inserting a new `config_version` 
 - **API & Keys** — generate an API key for another team, **download a share file** with the
   base URL + ready-to-run curl/Python snippets, list/revoke keys.
 
-Enter the **admin key** (top-right field, stored in your browser) to use the Config and
-API-Keys tabs and the Generate action. Viewing (Live/Explore/Weather) needs no key — those
-use open, read-only feeds that expose no secrets; the 8 business APIs stay key-protected.
+The dashboard is the **trusted same-origin admin console** — it needs **no key** at all.
+Its actions (Generate, save config, mint/revoke API keys) call open `/dashboard/api/*`
+endpoints; the **8 business `/plants` & `/admin` APIs stay key-protected** for external
+consumers, and the dashboard's read feeds expose no secrets. If today's simulation hasn't
+been generated yet (e.g. the day just rolled over), the Live tab **auto-generates it once**.
+
+> **Production note:** because the console is unauthenticated, put the dashboard behind your
+> own network/auth, or set `DASHBOARD_CONSOLE_WRITE=false` to disable the write actions
+> (read-only feeds stay on; use the key-protected APIs for changes). See DEPLOYMENT.md.
 
 ---
 
