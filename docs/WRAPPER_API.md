@@ -1,8 +1,9 @@
 # Restricted Renewable Wrapper API (`/api/renewable/*`)
 
 A locked-down, user-facing API that exposes **only live and historical** generation
-data — **never forecast**. It proxies the full Renewable Generation API server-side,
-so external users/Excel never see the provider's API key, raw paths, or internals.
+data — **never forecast**. It reads this application's own data **in-process** (no
+outbound call, no provider key), so there is nothing to activate beyond an optional
+shared user key, and external users/Excel never see raw provider paths or internals.
 
 ## What it allows / blocks
 
@@ -18,17 +19,14 @@ responses, (3) `/current` returns **403** if its reading is a forecast.
 ## Configuration (environment variables)
 
 ```
-RENEWABLE_API_BASE_URL=https://renewable-sim.onrender.com
-RENEWABLE_API_KEY=<external provider read key>     # server-side only, never exposed
 RENEWABLE_PLANT_ID=HYBRID01
 RENEWABLE_PLANT_TZ=Asia/Kolkata
 RENEWABLE_WRAPPER_USER_API_KEY=<key your users send>   # optional; blank = open
 ```
 
-- `RENEWABLE_API_KEY` is the **provider** key (mint a `read` key on the provider's
-  "API & Keys" tab). It is used only for outbound calls and is never returned/logged.
-- `RENEWABLE_WRAPPER_USER_API_KEY` is what **your users** send as `X-API-Key`. It is a
-  different key and never grants provider access. If unset, the wrapper is open.
+- The wrapper reads data **in-process** — there is **no provider key** to set or maintain.
+- `RENEWABLE_WRAPPER_USER_API_KEY` is what **your users** send as `X-API-Key`. Set it to
+  one value you hand to your users before sharing. If left blank, the wrapper is open.
 
 ## Endpoints
 

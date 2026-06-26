@@ -1,7 +1,7 @@
 """Optional, env-based API key for the user-facing wrapper.
 
-This key (RENEWABLE_WRAPPER_USER_API_KEY) is what external users/Excel send. It is
-DIFFERENT from the provider key (RENEWABLE_API_KEY) and never grants provider access.
+This key (RENEWABLE_WRAPPER_USER_API_KEY) is what external users/Excel send as the
+X-API-Key header. The wrapper reads data in-process, so this is the only key involved.
 If the env var is unset, the wrapper is open (auth disabled) — set it to lock down.
 """
 from __future__ import annotations

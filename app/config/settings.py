@@ -63,17 +63,13 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGINS: str = "*"
 
     # --- Restricted user-facing wrapper API (/api/renewable/*) ------------------
-    # Calls the external Renewable Generation provider over HTTP and exposes only
-    # LIVE + HISTORICAL data (never FORECAST). The provider key is server-side only
-    # and is never returned to users. Leave RENEWABLE_API_KEY blank to disable the
-    # wrapper's outbound calls (endpoints then return a clear 500 config error).
-    RENEWABLE_API_BASE_URL: str = "https://renewable-sim.onrender.com"
-    RENEWABLE_API_KEY: str = ""               # external provider key — DO NOT hardcode
+    # Exposes ONLY live + historical data (never forecast). It reads this app's own
+    # data in-process — no provider key or outbound call needed. The only thing to
+    # set is the optional shared user key below.
     RENEWABLE_PLANT_ID: str = "HYBRID01"
     RENEWABLE_PLANT_TZ: str = "Asia/Kolkata"  # used to compute "today" for date checks
-    RENEWABLE_API_TIMEOUT_SECONDS: float = 30.0
-    # Optional shared key external users/Excel must send (X-API-Key). Blank = open.
-    # This is DIFFERENT from RENEWABLE_API_KEY and never grants provider access.
+    # Optional shared key external users/Excel must send as X-API-Key. Blank = open.
+    # Set this to one value you hand to your users before sharing the wrapper.
     RENEWABLE_WRAPPER_USER_API_KEY: str = ""
 
     # App
