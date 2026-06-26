@@ -44,6 +44,16 @@
   .toast.err { border-color:#f87171; } .toast.good { border-color:#34d399; }
   code, pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:10px; display:block; white-space:pre-wrap; word-break:break-all; font-size:12px; color:#cfe0f5; }
   .muted{ color:var(--muted); } .keyrow{ font-family:monospace; }
+  /* Global loading overlay */
+  #spinner { position:fixed; inset:0; background:rgba(8,12,20,.55); backdrop-filter:blur(1.5px);
+    display:none; align-items:center; justify-content:center; z-index:9999; }
+  #spinner.show { display:flex; }
+  #spinner .ring { width:48px; height:48px; border-radius:50%; border:4px solid var(--line);
+    border-top-color:var(--accent); animation:spin .8s linear infinite; }
+  #spinner .lbl { color:var(--ink); font-size:13px; margin-top:14px; font-weight:600; }
+  #spinner .box { display:flex; flex-direction:column; align-items:center; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  td .ghost.mini { padding:3px 8px; font-size:11px; }
 </style>
 </head>
 <body>
@@ -103,7 +113,7 @@
         <button class="ghost" onclick="exploreGenerate()">Generate (fetch &amp; simulate)</button>
         <span id="expLabel" class="badge ok" style="display:none"></span>
       </div>
-      <div class="sub" style="margin-top:8px">“Generate” fetches live Open-Meteo data for the date and runs the simulation. “View” shows already-simulated data.</div>
+      <div class="sub" style="margin-top:8px">“Generate” fetches Open-Meteo data for the date and runs the simulation. “View” shows already-simulated data. <b>Mode</b> picks the weather source: <b>HISTORICAL</b> = what actually happened (past dates, reanalysis) · <b>LIVE</b> = today (actuals so far + forecast) · <b>FORECAST</b> = predicted (future dates). Mode auto-selects from the date — change it only to compare a past day's forecast vs. its actuals.</div>
     </div>
     <div class="grid kpis" id="expKpis" style="display:none">
       <div class="card kpi"><div class="v" id="eSolar">—</div><div class="l">Solar MWh</div></div>
@@ -200,12 +210,43 @@
   </section>
 </main>
 
+<div id="spinner"><div class="box"><div class="ring"></div><div class="lbl" id="spinnerLbl">Loading…</div></div></div>
 <div id="toast"></div>
 
 <script>
 const REFRESH = (__REFRESH_SECONDS__ || 900) * 1000;
 const ORIGIN = window.location.origin;
 const charts = {};
+
+// ---- global loading spinner (auto-shown while any fetch is in flight) ----
+// A 200ms delay-to-show keeps fast/cached requests (e.g. the 60s live poll when
+// the service is warm) from flashing the overlay; slow calls (cold start, a
+// "Generate" that hits Open-Meteo) show it as expected.
+let _inflight = 0, _spinTimer = null;
+function _spinOn(label){
+  if (label) document.getElementById('spinnerLbl').textContent = label;
+  _inflight++;
+  if (_inflight === 1 && !_spinTimer){
+    _spinTimer = setTimeout(()=>document.getElementById('spinner').classList.add('show'), 200);
+  }
+}
+function _spinOff(){
+  _inflight = Math.max(0, _inflight - 1);
+  if (_inflight === 0){
+    clearTimeout(_spinTimer); _spinTimer = null;
+    document.getElementById('spinner').classList.remove('show');
+    document.getElementById('spinnerLbl').textContent = 'Loading…';
+  }
+}
+const _origFetch = window.fetch.bind(window);
+window.fetch = (...args) => {
+  const url = (args[0] && args[0].url) || String(args[0] || '');
+  let label = 'Loading…';
+  if (url.includes('/generate')) label = 'Fetching Open-Meteo & simulating…';
+  else if (url.includes('/keys')) label = 'Working on API keys…';
+  _spinOn(label);
+  return _origFetch(...args).finally(_spinOff);
+};
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 function plant(){ return document.getElementById('plantCode').value.trim() || '__DEFAULT_PLANT__'; }
 function toast(msg, kind='good'){ const t=document.getElementById('toast'); t.className='toast '+kind; t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', 4500); }
@@ -220,9 +261,20 @@ document.querySelectorAll('#nav a').forEach(a => a.onclick = () => {
   document.getElementById('tab-'+id).classList.add('active');
   if (id==='config') loadConfig();
   if (id==='apikeys'){ listKeys(); renderExamples(); }  // eslint-disable-line
-  if (id==='explore' && !document.getElementById('expDate').value) document.getElementById('expDate').value = todayISO();
-  if (id==='weather' && !document.getElementById('wxDate').value) document.getElementById('wxDate').value = todayISO();
+  if (id==='explore'){ if(!document.getElementById('expDate').value) document.getElementById('expDate').value = todayISO(); setExpModeFromDate(); }
+  if (id==='weather'){ if(!document.getElementById('wxDate').value) document.getElementById('wxDate').value = todayISO(); setWxModeFromDate(); }
 });
+
+// Mode follows the date: past -> HISTORICAL, today -> LIVE, future -> FORECAST.
+function autoModeFor(dateStr){
+  if(!dateStr) return null;
+  const t = todayISO();
+  if(dateStr < t) return 'HISTORICAL';
+  if(dateStr > t) return 'FORECAST';
+  return 'LIVE';
+}
+function setExpModeFromDate(){ const m=autoModeFor(document.getElementById('expDate').value); if(m) document.getElementById('expMode').value=m; }
+function setWxModeFromDate(){ const m=autoModeFor(document.getElementById('wxDate').value); if(m) document.getElementById('wxMode').value=m; }
 
 function baseOpts(unit){ return { responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
   scales:{ x:{ ticks:{color:'#90a0b8',maxTicksLimit:12}, grid:{color:'#243149'} },
@@ -358,7 +410,10 @@ async function listKeys(){
     if(!j.keys.length){ tb.innerHTML='<tr><td colspan=6 class=muted>No keys yet — generate one</td></tr>'; return; }
     j.keys.forEach(k=>{ const tr=document.createElement('tr'); tr.innerHTML=
       `<td class=keyrow>${k.key_prefix}…</td><td>${k.team}</td><td>${k.scope}</td><td>${k.is_active?'✅':'❌'}</td><td>${k.rate_limit_per_min}</td>`+
-      `<td>${k.is_active?`<button class=ghost style="padding:3px 8px" onclick="revokeKey('${k.key_prefix}')">revoke</button>`:''}</td>`;
+      `<td style="white-space:nowrap;text-align:right">`+
+        `<button class="ghost mini" onclick="downloadKeyDocs('${k.key_prefix}')">⬇ docs</button> `+
+        `${k.is_active?`<button class="ghost mini" onclick="revokeKey('${k.key_prefix}')">revoke</button>`:''}`+
+      `</td>`;
       tb.appendChild(tr); });
   }catch(e){ toast('List failed: '+e.message,'err'); }
 }
@@ -378,51 +433,145 @@ async function createKey(){
 async function revokeKey(p){
   try{ const r=await fetch(`/dashboard/api/keys/${p}`,{method:'DELETE'}); const j=await r.json(); toast(j.message||j.detail); listKeys(); }
   catch(e){ toast('Revoke failed','err'); } }
-function shareText(key){
-  const c=plant();
-  return `Renewable Generation API — access details
-=================================================
+function shareText(key, opts){
+  opts = opts || {};
+  const c = plant();
+  const today = todayISO();
+  // A recent past date for examples (today - 5 days), so curl samples return data.
+  const past = new Date(Date.now() - 5*86400000).toISOString().slice(0,10);
+  const future = new Date(Date.now() + 3*86400000).toISOString().slice(0,10);
+  const keyNote = opts.prefix
+    ? `API key  : <YOUR_API_KEY>   (the key starting "${opts.prefix}" — its secret was shown ONLY once,
+           when it was created. Paste that saved secret here; it cannot be retrieved again.)`
+    : `API key  : ${key}`;
+  return `RENEWABLE GENERATION API — ACCESS & USAGE GUIDE
+================================================================
 Base URL : ${ORIGIN}
 Plant    : ${c}
-API key  : ${key}
-Header   : X-API-Key: ${key}
+${keyNote}
+Auth     : send the key on EVERY request in this HTTP header:
+               X-API-Key: ${opts.prefix ? '<YOUR_API_KEY>' : key}
+Rate     : 120 requests/min per key (HTTP 429 if exceeded).
+Format   : all responses are JSON. Interactive docs: ${ORIGIN}/docs
 
-This is a LIVE feed of SIMULATED ACTUAL generation (weather-driven estimate, not metered).
-The /current and /live endpoints auto-refresh from live Open-Meteo data every 15 minutes
-on access — just poll them and you always get the latest. Label: LIVE_ESTIMATED.
+WHAT THE DATA IS
+----------------------------------------------------------------
+A weather-driven SIMULATION of solar + wind + hybrid generation in 15-minute
+blocks (96 blocks = one day). It is an estimate from Open-Meteo weather, NOT
+metered/SCADA data. Every block & day carries a "data_label":
+  LIVE_ESTIMATED        – today, blocks up to now (actuals-so-far estimate)
+  FORECAST_SIMULATED    – future blocks / future dates (predicted)
+  HISTORICAL_SIMULATED  – completed past dates (from reanalysis weather)
+  PARTIAL / FAILED      – some/all blocks had degraded weather input
 
-# --- LIVE: latest reading right now (poll this every ~15 min) ---
-curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/current
-curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/live        # full 96-block day curve
+================================================================
+ENDPOINTS  (replace the key in the header; all are GET)
+================================================================
 
-# --- other endpoints ---
-curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/config
-curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/historical?date=2026-06-20"
-curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/forecast?horizon_days=3"
-curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/summary?date=2026-06-20"
-curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/range?start=2026-06-20&end=2026-06-25"
-curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/weather?date=2026-06-20&mode=HISTORICAL"
+1) NOW — the single latest reading. Best for a live dashboard tile.
+   GET /plants/${c}/current
+   curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/current
+   Returns: block_no, block_start, block_end, solar_mw, wind_mw, total_mw,
+            energy_today_mwh, hybrid_cuf, data_label, as_of,
+            refresh_interval_minutes
+   Note: auto-refreshes from live Open-Meteo every 15 min on access.
 
-# --- Python: keep pulling the latest live generation every 15 min ---
-import requests, time
-H = {"X-API-Key": "${key}"}; B = "${ORIGIN}"
+2) TODAY — full 96-block curve (completed = LIVE_ESTIMATED, rest = forecast).
+   GET /plants/${c}/live
+   curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/live
+   Returns: current_block_no + blocks[] (see BLOCK FIELDS below).
+
+3) PAST DAY — actual (reanalysis) generation for a completed date.
+   GET /plants/${c}/historical?date=YYYY-MM-DD
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/historical?date=${past}"
+
+4) FUTURE — expected generation (by explicit date OR days-ahead).
+   GET /plants/${c}/forecast?date=YYYY-MM-DD
+   GET /plants/${c}/forecast?horizon_days=N      (0=rest of today, 1, 3, 7…)
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/forecast?date=${future}"
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/forecast?horizon_days=3"
+
+5) DAILY SUMMARY — totals for one date or a range.
+   GET /plants/${c}/summary?date=YYYY-MM-DD
+   GET /plants/${c}/summary?start=YYYY-MM-DD&end=YYYY-MM-DD
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/summary?date=${past}"
+   Returns per day: solar_mwh, wind_mwh, total_mwh, solar_peak_mw, wind_peak_mw,
+            solar_cuf, wind_cuf, hybrid_cuf, solar_specific_yield (kWh/kWp).
+
+6) BLOCK RANGE — 15-min blocks across many days (max 31 days), grouped per day.
+   GET /plants/${c}/range?start=YYYY-MM-DD&end=YYYY-MM-DD
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/range?start=${past}&end=${today}"
+
+7) WEATHER — the 15-min weather inputs used for a date.
+   GET /plants/${c}/weather?date=YYYY-MM-DD&mode=HISTORICAL|LIVE|FORECAST
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/weather?date=${past}&mode=HISTORICAL"
+
+8) PLANT CONFIG — capacities, location, model assumptions.
+   GET /plants/${c}/config
+   curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/config
+
+BLOCK FIELDS (endpoints 2,3,4,6 -> each item in "blocks")
+----------------------------------------------------------------
+  block_no (1–96), block_start, block_end,
+  solar_mw, wind_mw, total_mw,            (instantaneous power, MW)
+  solar_mwh, wind_mwh, total_mwh,         (energy in that 15-min block)
+  solar_cuf, wind_cuf, hybrid_cuf,        (capacity utilization 0–1)
+  solar_status, wind_status, data_label, data_quality_status
+
+================================================================
+PYTHON — quickstart
+================================================================
+import requests
+BASE = "${ORIGIN}"
+KEY  = "${opts.prefix ? '<YOUR_API_KEY>' : key}"
+H    = {"X-API-Key": KEY}
+
+# a) latest reading right now
+now = requests.get(f"{BASE}/plants/${c}/current", headers=H).json()
+print(now["block_start"], now["total_mw"], "MW", now["data_label"])
+
+# b) today's full curve
+day = requests.get(f"{BASE}/plants/${c}/live", headers=H).json()
+print("blocks:", len(day["blocks"]), "current block:", day["current_block_no"])
+
+# c) a past day's totals
+s = requests.get(f"{BASE}/plants/${c}/summary", headers=H,
+                 params={"date": "${past}"}).json()
+print(s["summaries"][0]["total_mwh"], "MWh")
+
+# d) poll the live reading every 15 min
+import time
 while True:
-    r = requests.get(f"{B}/plants/${c}/current", headers=H).json()
-    print(r["block_start"], "total", r["total_mw"], "MW", "| solar", r["solar_mw"], "wind", r["wind_mw"], "(", r["data_label"], ")")
-    time.sleep(900)   # 15 minutes
+    r = requests.get(f"{BASE}/plants/${c}/current", headers=H).json()
+    print(r["block_start"], "total", r["total_mw"], "MW |",
+          "solar", r["solar_mw"], "wind", r["wind_mw"], "(", r["data_label"], ")")
+    time.sleep(900)
 
-Interactive docs: ${ORIGIN}/docs
+================================================================
+ERRORS
+================================================================
+  401  missing/invalid/expired key  -> check the X-API-Key header
+  429  rate limit (120/min)         -> slow down / back off
+  404  no data for that date/mode   -> generate it first or pick another date
+
+Interactive API explorer (try requests in the browser): ${ORIGIN}/docs
 `;
 }
 function renderExamples(){ document.getElementById('apiExamples').textContent = shareText(window._newKey || '<YOUR_API_KEY>'); }
-function downloadShare(){
-  const blob=new Blob([shareText(window._newKey)],{type:'text/plain'});
+function downloadDoc(text, suffix){
+  const blob=new Blob([text],{type:'text/plain'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download=`renewable-api-${plant()}.txt`; a.click(); URL.revokeObjectURL(a.href);
+  a.download=`renewable-api-${plant()}${suffix||''}.txt`; a.click(); URL.revokeObjectURL(a.href);
 }
+function downloadShare(){ downloadDoc(shareText(window._newKey), ''); }
+// Per existing key: documentation with that key's prefix noted (secret is not
+// recoverable, so it ships a <YOUR_API_KEY> placeholder for the saved secret).
+function downloadKeyDocs(prefix){ downloadDoc(shareText('<YOUR_API_KEY>', {prefix}), '-'+prefix.replace(/[^A-Za-z0-9_]/g,'')); }
 
 // init
 document.getElementById('plantCode').addEventListener('change', loadLive);
+document.getElementById('expDate').addEventListener('change', setExpModeFromDate);
+document.getElementById('wxDate').addEventListener('change', setWxModeFromDate);
 loadLive();
 setInterval(()=>{ if(document.getElementById('tab-live').classList.contains('active')) loadLive(); }, REFRESH);
 </script>
