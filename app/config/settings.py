@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     SCHEDULER_DAILY_TIME: str = "00:30"
     LIVE_REFRESH_MINUTES: int = 15
 
+    # Keep-alive: self-ping the public URL so a free-tier host (Render/Railway/Fly)
+    # never spins down on idle. Render auto-injects RENDER_EXTERNAL_URL; if KEEPALIVE_URL
+    # is blank we fall back to that. Ping interval must be < the host's idle threshold
+    # (Render = 15 min), so 10 min keeps the service permanently awake.
+    KEEPALIVE_ENABLED: bool = False
+    KEEPALIVE_URL: str = ""
+    KEEPALIVE_MINUTES: int = 10
+
     # Dashboard
     DASHBOARD_REFRESH_SECONDS: int = 60
     # The dashboard console performs config edits / key generation / simulation runs

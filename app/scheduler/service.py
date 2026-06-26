@@ -10,9 +10,11 @@ idempotent and can be triggered manually for any date.
 """
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -86,6 +88,30 @@ def run_for_date(plant_code: str, sim_date: date, mode: DataMode | None = None) 
     run_simulation_sync(plant_code, sim_date, mode, triggered_by="manual", force_refetch=True)
 
 
+def _keepalive_url() -> str:
+    """Public base URL to self-ping (explicit setting wins, else the host's env var)."""
+    settings = get_settings()
+    base = settings.KEEPALIVE_URL or os.environ.get("RENDER_EXTERNAL_URL", "")
+    return base.rstrip("/")
+
+
+def run_keepalive() -> None:
+    """Self-ping /health so a free-tier host never spins down on idle.
+
+    A no-op if no public URL is known. Failures are swallowed — a missed ping just
+    means the host may sleep until the next inbound request wakes it.
+    """
+    base = _keepalive_url()
+    if not base:
+        logger.warning("keepalive enabled but no URL (set KEEPALIVE_URL or RENDER_EXTERNAL_URL)")
+        return
+    try:
+        r = httpx.get(f"{base}/health", timeout=10.0)
+        logger.debug("keepalive ping %s -> %s", base, r.status_code)
+    except Exception as exc:  # noqa: BLE001 — never let a ping failure surface
+        logger.warning("keepalive ping failed: %s", exc)
+
+
 class SchedulerService:
     def __init__(self):
         self.scheduler = BackgroundScheduler(timezone="UTC")
@@ -112,11 +138,21 @@ class SchedulerService:
             replace_existing=True,
             misfire_grace_time=300,
         )
+        if settings.KEEPALIVE_ENABLED:
+            self.scheduler.add_job(
+                run_keepalive,
+                IntervalTrigger(minutes=max(1, settings.KEEPALIVE_MINUTES)),
+                id="keepalive",
+                replace_existing=True,
+                misfire_grace_time=120,
+                next_run_time=datetime.now(ZoneInfo("UTC")),  # ping immediately on boot
+            )
         self.scheduler.start()
         self._started = True
         logger.info(
-            "Scheduler started (daily=%s %s, live every %dmin)",
+            "Scheduler started (daily=%s %s, live every %dmin, keepalive=%s)",
             settings.SCHEDULER_DAILY_TIME, tz, settings.LIVE_REFRESH_MINUTES,
+            settings.KEEPALIVE_ENABLED,
         )
 
     def shutdown(self) -> None:

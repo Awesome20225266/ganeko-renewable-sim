@@ -4,11 +4,12 @@
 # Deploy: New + → Blueprint → connect this repo → Apply. Render will prompt for the
 # DATABASE_URL (paste your Supabase connection string — see DEPLOYMENT.md §Supabase).
 #
-# Free-tier note: the web service sleeps after ~15 min idle; the first request then takes
-# ~30s and the in-process scheduler pauses while asleep. The /current & /live endpoints
-# self-refresh on access, so a shared API key still returns data <=15 min old once hit.
-# For always-on + a dedicated scheduler worker, use a paid plan and add a `type: worker`
-# service running `bash scripts/entrypoint.sh scheduler` (same DATABASE_URL).
+# Free-tier note: a free web service would normally sleep after ~15 min idle. We keep it
+# awake with KEEPALIVE_ENABLED=true — the in-process scheduler self-pings /health every
+# 10 min (via the auto-injected RENDER_EXTERNAL_URL), which resets Render's idle timer and
+# keeps the scheduler running so shared API keys always get fast, fresh (<=15 min) data.
+# For a hard always-on guarantee, use a paid plan and add a `type: worker` service running
+# `bash scripts/entrypoint.sh scheduler` (same DATABASE_URL).
 services:
   - type: web
     name: renewable-sim
@@ -40,4 +41,7 @@ services:
       - key: PLANT_TZ
         value: Asia/Kolkata
       - key: LIVE_REFRESH_MINUTES
-        value: "30"
+        value: "15"
+      - key: KEEPALIVE_ENABLED      # self-ping /health to prevent free-tier idle spin-down
+        value: "true"
+      # KEEPALIVE_URL left unset → falls back to Render's auto-injected RENDER_EXTERNAL_URL
