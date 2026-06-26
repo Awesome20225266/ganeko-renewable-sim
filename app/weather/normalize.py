@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.solar_geom import is_daylight
 from app.weather.client import GTI_VAR
 
 # Output weather variables and how to interpolate them from hourly data.
@@ -105,8 +106,16 @@ def normalize_to_blocks(
     raw_json: dict[str, Any],
     sim_date: date,
     use_global_tilted_irradiance: bool = False,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    timezone: str | None = None,
 ) -> list[NormalizedBlock]:
-    """Return exactly 96 NormalizedBlock objects for `sim_date` (plant-local time)."""
+    """Return exactly 96 NormalizedBlock objects for `sim_date` (plant-local time).
+
+    If latitude/longitude/timezone are given, a physical sun-elevation gate forces
+    POA = 0 and is_day = 0 for any block where the sun is below the horizon — so no
+    weather-data quirk can ever produce solar generation at night.
+    """
     hourly_df = _to_frame(raw_json.get("hourly"))
     m15_df = _to_frame(raw_json.get("minutely_15"))
 
@@ -154,13 +163,16 @@ def normalize_to_blocks(
     else:
         is_day_series = pd.Series(np.nan, index=target)
 
-    # Clamp radiation to >= 0.
+    # Clamp radiation to >= 0 and treat any missing radiation as 0 (no data -> no
+    # irradiance), never carried over from daytime via fill.
     for name in _RADIATION_VARS:
         if name in cols:
-            cols[name] = cols[name].clip(lower=0.0)
+            cols[name] = cols[name].clip(lower=0.0).fillna(0.0)
 
     ghi = cols.get("shortwave_radiation", pd.Series(np.nan, index=target))
     gti = cols.get(GTI_VAR, pd.Series(np.nan, index=target))
+
+    use_geo = latitude is not None and longitude is not None and timezone is not None
 
     blocks: list[NormalizedBlock] = []
     for i, t in enumerate(target):
@@ -192,12 +204,29 @@ def normalize_to_blocks(
         if ghi_v <= 0.0 and poa_v <= 0.0:
             is_day_v = 0
 
-        def cell(name: str, i: int = i) -> float | None:
+        # Physical sun-elevation gate: if the sun is below the horizon, force night —
+        # zero irradiance regardless of any weather-data quirk. This makes night-time
+        # solar generation impossible.
+        block_night = False
+        if use_geo:
+            mid = (t + pd.Timedelta(minutes=7, seconds=30)).to_pydatetime()
+            if not is_daylight(mid, timezone, latitude, longitude):
+                block_night = True
+                ghi_v = 0.0
+                gti_v = 0.0
+                poa_v = 0.0
+                is_day_v = 0
+
+        def cell(name: str, i: int = i, night: bool = block_night) -> float | None:
             s = cols.get(name)
             if s is None:
                 return None
             v = s.iloc[i]
-            return None if pd.isna(v) else float(v)
+            if pd.isna(v):
+                return None
+            if night and name in _RADIATION_VARS:
+                return 0.0
+            return float(v)
 
         blocks.append(
             NormalizedBlock(

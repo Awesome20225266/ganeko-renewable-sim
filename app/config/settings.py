@@ -20,9 +20,9 @@ class Settings(BaseSettings):
 
     # Seed plant (configurable placeholder location)
     PLANT_CODE: str = "HYBRID01"
-    PLANT_NAME: str = "Jaisalmer Hybrid Park"
-    PLANT_LAT: float = 26.9124
-    PLANT_LON: float = 70.9026
+    PLANT_NAME: str = "Ganeko Two Energy Private Limited"
+    PLANT_LAT: float = 17.60
+    PLANT_LON: float = 76.36
     PLANT_TZ: str = "Asia/Kolkata"
 
     # Open-Meteo

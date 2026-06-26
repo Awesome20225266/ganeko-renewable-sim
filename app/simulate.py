@@ -301,7 +301,14 @@ async def run_simulation(
             with session_scope() as db:
                 persist_raw(db, fetch)
 
-        blocks = normalize_to_blocks(raw_json, sim_date, spec.use_global_tilted_irradiance)
+        blocks = normalize_to_blocks(
+            raw_json,
+            sim_date,
+            spec.use_global_tilted_irradiance,
+            latitude=spec.latitude,
+            longitude=spec.longitude,
+            timezone=spec.timezone,
+        )
         results = simulate_day(spec, blocks, texture=settings.REALISM_TEXTURE)
         quality = check_day(spec, results)
 
