@@ -1,17 +1,21 @@
-"""Alembic migration environment. Uses the app's DATABASE_URL and metadata."""
+"""Alembic migration environment. Uses the app's DATABASE_URL and metadata.
+
+The URL is taken straight from app settings and fed to create_engine directly — it is
+NOT routed through alembic.ini / ConfigParser, so URLs containing '%' (e.g. a password
+with a percent-encoded character like %40) won't trigger interpolation errors.
+"""
 from __future__ import annotations
 
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 
 from app.config.settings import get_settings
-from app.db.base import Base
 from app.db import models  # noqa: F401  (register models on Base.metadata)
+from app.db.base import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().DATABASE_URL)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -19,9 +23,13 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _db_url() -> str:
+    return get_settings().DATABASE_URL
+
+
 def run_migrations_offline() -> None:
     context.configure(
-        url=get_settings().DATABASE_URL,
+        url=_db_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         render_as_batch=True,
@@ -33,11 +41,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = get_settings().DATABASE_URL
-    connectable = engine_from_config(
-        configuration, prefix="sqlalchemy.", poolclass=pool.NullPool
-    )
+    connectable = create_engine(_db_url(), poolclass=pool.NullPool, future=True)
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
