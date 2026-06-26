@@ -2,8 +2,8 @@
   "project": "Renewable Generation Simulation Platform",
   "build_complete": true,
   "current_phase": 10,
-  "last_completed_step": "Frontend v3: removed admin-key requirement from UI -> dashboard is keyless trusted same-origin console with open /dashboard/api/* write endpoints (generate, config PUT, key create/list/revoke) sharing logic via app/services.py; public /plants & /admin APIs still key-protected (verified 401). Added realism 'texture' (already wired: deterministic cloud-flicker + wind-turbulence; wind block-to-block roughness ~4.6x with daily energy/caps preserved). Live tab self-heals (auto-generates today once if missing). Production safety valve DASHBOARD_CONSOLE_WRITE. 37 tests pass; ruff clean; all 5 tabs verified end-to-end in browser (Generate/Config/Weather/Keys) with no console errors.",
-  "next_action": "DONE. Nothing required unless the user requests changes.",
+  "last_completed_step": "Deployment: (1) LIVE now via Cloudflare quick tunnel from this machine (scripts/tunnel.ps1 -> https://<x>.trycloudflare.com; must point cloudflared at 127.0.0.1 not localhost to avoid IPv6 ::1 404s). (2) Permanent cloud ready: render.yaml Blueprint (free Docker web service w/ in-process scheduler + free Postgres), entrypoint honors $PORT, Dockerfile healthcheck uses $PORT, DEPLOYMENT.md has exact Render steps. User must push to GitHub + click Apply on Render (needs their account). 37 tests pass; ruff clean; live URL verified serving real data.",
+  "next_action": "DONE. For permanent host: user pushes repo to GitHub and runs Render Blueprint. Tunnel stays live while their PC + cloudflared run.",
   "design_decisions": [
     "Site location not present in Book1 (4).xlsx (verified: no lat/long text/coordinates anywhere in the 35k-row sheet). Per spec, location is a configurable placeholder. Seed defaults to Jaisalmer, Rajasthan (26.9124, 70.9026, Asia/Kolkata) - strong solar+wind. Override via .env (PLANT_LAT/PLANT_LON/PLANT_TZ) or DB.",
     "DB: SQLAlchemy via DATABASE_URL; SQLite zero-config local default, Postgres in docker-compose. Alembic migration (187b7cae8814) + create_all bootstrap fallback.",

@@ -24,6 +24,10 @@ local.db
 logs/
 data/*.out
 data/*.err
+data/tunnel.*
+
+# Downloaded binaries (cloudflared, etc.)
+tools/
 
 # OS
 .DS_Store

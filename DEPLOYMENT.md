@@ -70,6 +70,35 @@ uses whatever origin you open it on, so it will contain the public URL automatic
 
 ---
 
+## Option B0 — Render in ~10 min using the bundled `render.yaml` (recommended)
+
+This repo ships a ready Blueprint (`render.yaml`): one free Docker web service (API +
+dashboard + in-process scheduler) + a free Postgres database. Migrations and the seed run
+automatically on boot.
+
+1. **Put the code on GitHub** (Render deploys from a Git repo). From the project folder:
+   ```bash
+   git init -b main            # if not already a repo
+   git add -A && git commit -m "Renewable simulation platform"
+   # create an EMPTY repo on github.com first, then:
+   git remote add origin https://github.com/<you>/<repo>.git
+   git push -u origin main
+   ```
+2. Go to **https://dashboard.render.com → New + → Blueprint**.
+3. Connect your GitHub and pick the repo. Render reads `render.yaml` and shows a web
+   service + a Postgres database — click **Apply**.
+4. Wait for the build (a few minutes). Render gives you a public HTTPS URL like
+   `https://renewable-sim.onrender.com`.
+5. Open `…/dashboard`. The admin key is auto-generated (`ADMIN_BOOTSTRAP_KEY`); find it
+   under the service's **Environment** tab if you need it for the key-protected APIs.
+
+Free-tier caveats: the web service sleeps after ~15 min idle (first request then ~30s,
+and the in-process scheduler pauses while asleep); free Postgres is time-limited. For
+always-on + a dedicated scheduler worker, switch to a paid plan and add a `type: worker`
+service running `bash scripts/entrypoint.sh scheduler` (see the comment in `render.yaml`).
+
+> Railway/Fly use the same Docker image — see Option B below for the per-platform recipe.
+
 ## Option B — PaaS (Render / Railway / Fly.io)
 
 The same Docker image deploys to any container PaaS. General recipe:
@@ -112,6 +141,20 @@ docker run -d -p 8000:8000 \
 Trade-off: don't scale this service to >1 replica, or the scheduler runs N times.
 
 ---
+
+## Option D — instant public URL (Cloudflare quick tunnel, no account)
+
+Make the server running on your machine reachable on the internet in ~1 minute — handy
+for a quick share/demo. The URL is live only while your PC + the tunnel run, and changes
+on restart.
+```powershell
+py -m uvicorn app.main:app --port 8000      # terminal 1 (the app)
+powershell -File scripts/tunnel.ps1          # terminal 2 → prints https://<x>.trycloudflare.com
+```
+The helper downloads `cloudflared` on first use and points it at `127.0.0.1:8000`
+(using `127.0.0.1`, not `localhost`, avoids an IPv6 `::1` resolution issue that makes
+some routes 404). Security: this exposes the keyless console publicly — set
+`DASHBOARD_CONSOLE_WRITE=false` first, or only share with people you trust.
 
 ## Scaling & production notes
 

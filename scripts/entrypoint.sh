@@ -29,8 +29,10 @@ python -m app.db.seed || true
 
 case "$ROLE" in
   api)
-    echo "[entrypoint] starting API (uvicorn)"
-    exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    # Honor the platform-provided $PORT (Render/Railway/Fly); default 8000 locally.
+    PORT="${PORT:-8000}"
+    echo "[entrypoint] starting API (uvicorn) on port ${PORT}"
+    exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT}"
     ;;
   scheduler)
     echo "[entrypoint] starting scheduler"
