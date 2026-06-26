@@ -381,3 +381,79 @@ def run_simulation_sync(
     return asyncio.run(
         run_simulation(plant_code, sim_date, mode, triggered_by, force_refetch, settings)
     )
+
+
+# --------------------------------------------------------------------------- #
+# On-access freshness: keep today's LIVE simulation no older than the refresh
+# window, so a shared API key always returns current data even when the
+# scheduler isn't running. The per-plant lock + freshness gate ensure at most
+# one re-fetch per window no matter how many consumers poll concurrently.
+# --------------------------------------------------------------------------- #
+import threading  # noqa: E402
+from collections import defaultdict  # noqa: E402
+
+_live_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+
+
+def _latest_live_fetch_time(db: Session, plant_code: str, sim_date: date) -> datetime | None:
+    row = db.scalar(
+        select(GenerationBlock)
+        .where(
+            GenerationBlock.plant_code == plant_code,
+            GenerationBlock.sim_date == sim_date,
+            GenerationBlock.data_mode == DataMode.LIVE.value,
+            GenerationBlock.is_current.is_(True),
+        )
+        .order_by(GenerationBlock.processed_at.desc())
+    )
+    if row is None:
+        return None
+    t = row.weather_fetch_time or row.processed_at
+    if t is not None and t.tzinfo is None:
+        t = t.replace(tzinfo=UTC)
+    return t
+
+
+def ensure_fresh_live(plant_code: str, max_age_minutes: int | None = None) -> dict:
+    """Refresh today's LIVE simulation if it is older than the freshness window.
+
+    Returns {"refreshed": bool, "age_seconds": float|None, "as_of": iso|None}.
+    Safe to call on every API/dashboard read; it re-simulates at most once per window.
+    """
+    settings = get_settings()
+    max_age = (max_age_minutes or settings.LIVE_REFRESH_MINUTES) * 60.0
+    try:
+        with session_scope() as db:
+            cfg = load_active_config(db, plant_code)
+            tz = cfg.timezone
+            today = datetime.now(ZoneInfo(tz)).date()
+            last = _latest_live_fetch_time(db, plant_code, today)
+        now = datetime.now(UTC)
+        age = (now - last).total_seconds() if last else None
+        if age is not None and age < max_age:
+            return {"refreshed": False, "age_seconds": age, "as_of": last.isoformat()}
+
+        lock = _live_locks[plant_code]
+        if not lock.acquire(blocking=False):
+            # Another refresh is already running; serve whatever is current.
+            return {"refreshed": False, "age_seconds": age, "in_progress": True,
+                    "as_of": last.isoformat() if last else None}
+        try:
+            # Re-check inside the lock (another thread may have just refreshed).
+            with session_scope() as db:
+                last2 = _latest_live_fetch_time(db, plant_code, today)
+            age2 = (datetime.now(UTC) - last2).total_seconds() if last2 else None
+            if age2 is not None and age2 < max_age:
+                return {"refreshed": False, "age_seconds": age2, "as_of": last2.isoformat()}
+            run_simulation_sync(
+                plant_code, today, DataMode.LIVE, triggered_by="auto-live", force_refetch=True
+            )
+            with session_scope() as db:
+                fresh = _latest_live_fetch_time(db, plant_code, today)
+            return {"refreshed": True, "age_seconds": 0.0,
+                    "as_of": fresh.isoformat() if fresh else None}
+        finally:
+            lock.release()
+    except Exception as exc:  # noqa: BLE001 — never let a refresh failure break a read
+        logger.warning("ensure_fresh_live(%s) failed: %s", plant_code, exc)
+        return {"refreshed": False, "error": str(exc)}

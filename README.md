@@ -62,7 +62,12 @@ curl -H "X-API-Key: $KEY" $B/plants/HYBRID01/config
 curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/historical?date=2026-06-20"
 
 # 3) Live (today; completed blocks LIVE_ESTIMATED, remaining FORECAST_SIMULATED)
+#    Self-refreshing: re-simulates from live Open-Meteo if the last run is >15 min old,
+#    so a shared key always returns data <= 15 min old (no scheduler required).
 curl -H "X-API-Key: $KEY" $B/plants/HYBRID01/live
+
+# 3b) Current — the latest 'now' reading, ideal for polling a shared key every ~15 min
+curl -H "X-API-Key: $KEY" $B/plants/HYBRID01/current
 
 # 4) Forecast (by explicit date or horizon days: 0=rest of today,1,3,7,...)
 curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/forecast?date=2026-06-27"

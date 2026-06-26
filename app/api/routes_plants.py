@@ -17,6 +17,7 @@ from app.api.repository import (
 from app.api.schemas import (
     BlockOut,
     BlockSeriesOut,
+    CurrentOut,
     DailySummaryOut,
     PlantConfigOut,
     PlantConfigUpdate,
@@ -24,10 +25,11 @@ from app.api.schemas import (
     WeatherBlockOut,
     WeatherSeriesOut,
 )
+from app.config.settings import get_settings
 from app.db.base import session_scope
 from app.db.models import DailySummary, GenerationBlock, PlantConfig, SimulationVersion
 from app.services import create_config_version
-from app.simulate import load_active_config
+from app.simulate import ensure_fresh_live, load_active_config
 
 router = APIRouter(prefix="/plants", tags=["plants"])
 
@@ -216,6 +218,11 @@ def _series(code: str, sim_date: date, data_mode: str, current_block: int | None
                 f"No {data_mode} simulation for {code} on {sim_date}. "
                 f"Trigger a run via POST /admin/reprocess.",
             )
+        out_blocks = [_block_to_out(b) for b in blocks]
+        cur = None
+        if current_block and 0 < current_block <= len(out_blocks):
+            cur = out_blocks[current_block - 1]
+        as_of = blocks[0].weather_fetch_time
         return BlockSeriesOut(
             plant_code=code,
             sim_date=sim_date,
@@ -225,7 +232,10 @@ def _series(code: str, sim_date: date, data_mode: str, current_block: int | None
             weather_source=blocks[0].weather_source,
             block_count=len(blocks),
             current_block_no=current_block,
-            blocks=[_block_to_out(b) for b in blocks],
+            current=cur,
+            as_of=as_of,
+            refresh_interval_minutes=get_settings().LIVE_REFRESH_MINUTES,
+            blocks=out_blocks,
         )
 
 
@@ -241,7 +251,12 @@ def historical(
 
 @router.get("/{code}/live", response_model=BlockSeriesOut)
 def live(code: str, ctx: AuthContext = Depends(require_read)):
-    """Endpoint 3: today's blocks (completed = LIVE_ESTIMATED, remaining = FORECAST)."""
+    """Endpoint 3: today's blocks (completed = LIVE_ESTIMATED, remaining = FORECAST).
+
+    Self-refreshing: re-simulates from live Open-Meteo data if the last run is older
+    than the refresh window, so a shared key always returns data <= 15 min old.
+    """
+    ensure_fresh_live(code)
     with session_scope() as db:
         cfg = load_active_config(db, code)
         tz = cfg.timezone
@@ -249,6 +264,54 @@ def live(code: str, ctx: AuthContext = Depends(require_read)):
     today = now.date()
     current_block = now.hour * 4 + now.minute // 15 + 1
     return _series(code, today, "LIVE", current_block)
+
+
+@router.get("/{code}/current", response_model=CurrentOut)
+def current(code: str, ctx: AuthContext = Depends(require_read)):
+    """Latest 'now' reading — the live current-block generation.
+
+    Designed for polling with a shared key: it auto-refreshes from live weather every
+    LIVE_REFRESH_MINUTES on access, so the consumer always gets current data without
+    relying on the scheduler. This is a weather-based *simulated* estimate of actual
+    generation (LIVE_ESTIMATED), not metered/SCADA data.
+    """
+    ensure_fresh_live(code)
+    with session_scope() as db:
+        cfg = load_active_config(db, code)
+        tz = cfg.timezone
+        now = datetime.now(ZoneInfo(tz))
+        today = now.date()
+        cur_no = now.hour * 4 + now.minute // 15 + 1
+        blocks = get_blocks(db, code, today, "LIVE")
+        if not blocks:
+            raise HTTPException(404, f"No live simulation available yet for {code}.")
+        cur_no = min(cur_no, len(blocks))
+        b = blocks[cur_no - 1]
+        energy_today = sum(x.total_mwh for x in blocks[:cur_no])
+        return CurrentOut(
+            plant_code=code,
+            plant_name=cfg.plant_name,
+            timezone=tz,
+            sim_date=today,
+            block_no=b.block_no,
+            block_start=b.block_start,
+            block_end=b.block_end,
+            solar_mw=round(b.solar_mw, 3),
+            wind_mw=round(b.wind_mw, 3),
+            total_mw=round(b.total_mw, 3),
+            solar_ac_mw=cfg.solar_ac_mw,
+            wind_ac_mw=cfg.wind_ac_mw,
+            hybrid_cuf=round(b.hybrid_cuf, 4),
+            energy_today_mwh=round(energy_today, 3),
+            # /current is by definition the live now-reading; label it accordingly even
+            # if the block just ticked past the last refresh's "current" boundary.
+            data_label="LIVE_ESTIMATED",
+            data_quality_status=b.data_quality_status,
+            as_of=b.weather_fetch_time,
+            refresh_interval_minutes=get_settings().LIVE_REFRESH_MINUTES,
+            note="Weather-based simulated estimate of actual generation (not metered). "
+            "Auto-refreshes every refresh_interval_minutes on access.",
+        )
 
 
 @router.get("/{code}/forecast", response_model=BlockSeriesOut)

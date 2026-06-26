@@ -386,21 +386,29 @@ Plant    : ${c}
 API key  : ${key}
 Header   : X-API-Key: ${key}
 
-# --- curl ---
+This is a LIVE feed of SIMULATED ACTUAL generation (weather-driven estimate, not metered).
+The /current and /live endpoints auto-refresh from live Open-Meteo data every 15 minutes
+on access — just poll them and you always get the latest. Label: LIVE_ESTIMATED.
+
+# --- LIVE: latest reading right now (poll this every ~15 min) ---
+curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/current
+curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/live        # full 96-block day curve
+
+# --- other endpoints ---
 curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/config
 curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/historical?date=2026-06-20"
-curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/live
 curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/forecast?horizon_days=3"
 curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/summary?date=2026-06-20"
 curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/range?start=2026-06-20&end=2026-06-25"
 curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/weather?date=2026-06-20&mode=HISTORICAL"
 
-# --- Python ---
-import requests
-H = {"X-API-Key": "${key}"}
-B = "${ORIGIN}"
-r = requests.get(f"{B}/plants/${c}/live", headers=H)
-print(r.json()["data_label"], r.json()["block_count"])
+# --- Python: keep pulling the latest live generation every 15 min ---
+import requests, time
+H = {"X-API-Key": "${key}"}; B = "${ORIGIN}"
+while True:
+    r = requests.get(f"{B}/plants/${c}/current", headers=H).json()
+    print(r["block_start"], "total", r["total_mw"], "MW", "| solar", r["solar_mw"], "wind", r["wind_mw"], "(", r["data_label"], ")")
+    time.sleep(900)   # 15 minutes
 
 Interactive docs: ${ORIGIN}/docs
 `;

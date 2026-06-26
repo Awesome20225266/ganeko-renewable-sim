@@ -154,6 +154,34 @@ def test_dashboard_open_feeds(client):
     ).status_code == 200
 
 
+def test_ensure_fresh_live_skips_when_recent(client):
+    """If today's LIVE data is fresh, ensure_fresh_live must NOT refetch (no network)."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    from app.db.base import session_scope
+    from app.db.models import GenerationBlock
+    from app.simulate import ensure_fresh_live
+
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    midnight = datetime(today.year, today.month, today.day)
+    with session_scope() as db:
+        db.add(
+            GenerationBlock(
+                plant_code="HYBRID01", sim_date=today, block_no=1,
+                block_start=midnight, block_end=midnight,
+                data_mode="LIVE", data_source="test", data_label="LIVE_ESTIMATED",
+                data_quality_status="OK", simulation_version="v1.0.0",
+                model_assumption_version="v1.0.0", plant_config_version=1,
+                weather_source="test", weather_fetch_time=datetime.now(UTC),
+                is_current=True,
+            )
+        )
+    res = ensure_fresh_live("HYBRID01")
+    assert res["refreshed"] is False
+    assert res.get("age_seconds") is not None and res["age_seconds"] < 60
+
+
 def test_dashboard_config_update_no_key(client):
     """The dashboard console edits config WITHOUT an API key (trusted same-origin)."""
     before = client.get("/dashboard/api/config/HYBRID01").json()["config_version"]

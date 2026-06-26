@@ -23,7 +23,7 @@ from app.config.settings import get_settings
 from app.db.base import session_scope
 from app.db.models import ApiKey, WeatherBlock
 from app.services import create_api_key, create_config_version, revoke_api_key
-from app.simulate import load_active_config, run_simulation
+from app.simulate import ensure_fresh_live, load_active_config, run_simulation
 from app.weather.client import DataMode
 
 router = APIRouter(tags=["dashboard"])
@@ -52,6 +52,10 @@ def dashboard_page():
 
 @router.get("/dashboard/api/today/{code}")
 def dashboard_today(code: str):
+    # Keep today's LIVE data fresh on access (<= refresh window old), so the dashboard
+    # stays live even when the background scheduler isn't running.
+    if get_settings().DASHBOARD_CONSOLE_WRITE:
+        ensure_fresh_live(code)
     with session_scope() as db:
         try:
             cfg = load_active_config(db, code)

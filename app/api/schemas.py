@@ -118,7 +118,34 @@ class BlockSeriesOut(BaseModel):
     weather_source: str | None = None
     block_count: int
     current_block_no: int | None = None
+    current: BlockOut | None = None
+    as_of: datetime | None = None  # when the underlying weather was fetched (UTC)
+    refresh_interval_minutes: int | None = None
     blocks: list[BlockOut]
+
+
+class CurrentOut(BaseModel):
+    """Compact 'latest reading' for polling — refreshes every 15 min on access."""
+
+    plant_code: str
+    plant_name: str
+    timezone: str
+    sim_date: date
+    block_no: int
+    block_start: datetime
+    block_end: datetime
+    solar_mw: float
+    wind_mw: float
+    total_mw: float
+    solar_ac_mw: float
+    wind_ac_mw: float
+    hybrid_cuf: float
+    energy_today_mwh: float
+    data_label: str
+    data_quality_status: str
+    as_of: datetime | None = None
+    refresh_interval_minutes: int
+    note: str
 
 
 class DailySummaryOut(BaseModel):
