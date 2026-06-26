@@ -15,6 +15,7 @@ from app.dashboard import router as dashboard_router
 from app.db.base import init_db, session_scope
 from app.db.models import ApiUsageLog
 from app.logging_conf import configure_logging, get_logger
+from app.wrapper.router import router as wrapper_router
 
 logger = get_logger(__name__)
 
@@ -89,6 +90,7 @@ async def usage_logging(request: Request, call_next):
 app.include_router(plants_router)
 app.include_router(admin_router)
 app.include_router(dashboard_router)
+app.include_router(wrapper_router)
 
 
 @app.get("/", include_in_schema=False)
