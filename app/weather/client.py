@@ -220,28 +220,30 @@ async def _get_with_retry(
         try:
             resp = await client.get(url, params=params)
             if resp.status_code == 429 or resp.status_code >= 500:
-                retry_after = resp.headers.get("Retry-After")
-                wait = float(retry_after) if retry_after and retry_after.isdigit() else delay
-                logger.warning(
-                    "Open-Meteo %s (attempt %d/%d); backing off %.1fs",
-                    resp.status_code, attempt, max_retries, wait,
-                )
-                await asyncio.sleep(wait)
-                delay = min(delay * 2, 30.0)
                 last_exc = httpx.HTTPStatusError(
                     f"status {resp.status_code}", request=resp.request, response=resp
                 )
+                if attempt < max_retries:
+                    retry_after = resp.headers.get("Retry-After")
+                    wait = float(retry_after) if retry_after and retry_after.isdigit() else delay
+                    logger.warning(
+                        "Open-Meteo %s (attempt %d/%d); backing off %.1fs",
+                        resp.status_code, attempt, max_retries, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    delay = min(delay * 2, 30.0)
                 continue
             resp.raise_for_status()
             return resp
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             last_exc = exc
-            logger.warning(
-                "Open-Meteo transport error (attempt %d/%d): %s; backing off %.1fs",
-                attempt, max_retries, exc, delay,
-            )
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 30.0)
+            if attempt < max_retries:
+                logger.warning(
+                    "Open-Meteo transport error (attempt %d/%d): %s; backing off %.1fs",
+                    attempt, max_retries, exc, delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
     raise RuntimeError(f"Open-Meteo request failed after {max_retries} attempts") from last_exc
 
 

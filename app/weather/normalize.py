@@ -14,8 +14,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.logging_conf import get_logger
 from app.solar_geom import is_daylight
 from app.weather.client import GTI_VAR
+
+logger = get_logger(__name__)
 
 # Output weather variables and how to interpolate them from hourly data.
 _LINEAR_VARS = [
@@ -68,17 +71,32 @@ class NormalizedBlock:
 
 
 def _to_frame(section: dict[str, Any] | None) -> pd.DataFrame | None:
-    """Build a time-indexed DataFrame from an Open-Meteo 'hourly'/'minutely_15' block."""
+    """Build a time-indexed DataFrame from an Open-Meteo 'hourly'/'minutely_15' block.
+
+    Defensive against malformed/partial responses: each variable array is aligned to
+    the `time` axis by position (truncated if longer, NaN-padded if shorter) and the
+    Series is built ON the time index, so a length mismatch can neither raise nor
+    silently shift values onto the wrong timestamps.
+    """
     if not section or "time" not in section or not section["time"]:
         return None
     times = pd.to_datetime(section["time"])
+    n = len(times)
     data = {}
     for key, values in section.items():
         if key == "time":
             continue
-        data[key] = pd.to_numeric(pd.Series(values, dtype="object"), errors="coerce")
+        v = list(values) if values is not None else []
+        if len(v) != n:
+            logger.warning(
+                "Open-Meteo variable '%s' length %d != time length %d; aligning by position",
+                key, len(v), n,
+            )
+            v = v[:n] + [None] * max(0, n - len(v))
+        data[key] = pd.to_numeric(pd.Series(v, index=times, dtype="object"), errors="coerce")
+    if not data:
+        return None
     df = pd.DataFrame(data)
-    df.index = times
     df = df[~df.index.duplicated(keep="first")].sort_index()
     return df
 
