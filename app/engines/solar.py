@@ -43,10 +43,16 @@ def simulate_solar_block(
     t_cell = t_amb + (poa / NOCT_REF_IRRADIANCE) * (NOCT_C - 20.0)
     temp_factor = 1.0 + (spec.temp_coeff_pct_per_c / 100.0) * (t_cell - 25.0)
 
+    # Loss-chain model: STC DC, scaled by irradiance, then derated by the explicit
+    # temperature factor and the system loss factor. We intentionally do NOT multiply
+    # by performance_ratio here: PR is a *bundled* metric that already subsumes
+    # temperature + soiling/wiring/inverter/availability losses, so applying it on top
+    # of temp_factor and loss_factor double-counts and held the plant ~20% below
+    # nameplate — it could never reach the inverter clip on a 1.5 DC/AC array. PR is
+    # retained on PlantConfig as a reported reference figure, not a model input.
     dc_mw = (
         spec.solar_dc_mw
         * (poa / 1000.0)
-        * spec.solar_performance_ratio
         * temp_factor
         * (1.0 - spec.solar_loss_factor)
     )

@@ -15,9 +15,8 @@ def test_solar_zero_at_night(spec):
 
 
 def test_solar_clips_at_ac_capacity(spec):
-    # Cool, high-irradiance clear day -> DC exceeds AC -> clipped to solar_ac_mw.
-    # (At 25 C the derates keep DC ~151 MW < 160; clipping needs cool conditions,
-    #  which is the physically correct behaviour for a 1.5 DC/AC plant.)
+    # High-irradiance clear day -> DC array (240 MW) exceeds the 160 MW inverter and
+    # clips to solar_ac_mw. Correct behaviour for a 1.5 DC/AC plant.
     r = simulate_solar_block(spec, make_block(48, poa=1050.0, is_day=1, temp=5.0))
     assert r.ac_mw <= spec.solar_ac_mw + 1e-9
     assert abs(r.ac_mw - spec.solar_ac_mw) < 1e-6
@@ -25,11 +24,13 @@ def test_solar_clips_at_ac_capacity(spec):
     assert 0.0 < r.cuf <= 1.0 + 1e-9
 
 
-def test_solar_no_clip_at_warm_stc(spec):
-    # At 25 C / 1000 W/m^2 the derated DC stays below AC -> no clipping.
+def test_solar_clips_at_warm_stc(spec):
+    # Corrected loss-chain model (PR no longer double-counted with temp+loss): even at
+    # a warm 1000 W/m^2 / 25 C noon, the 240 MW DC array exceeds the 160 MW inverter and
+    # clips. Under the old triple-derate it peaked ~151 MW and never clipped.
     r = simulate_solar_block(spec, make_block(48, poa=1000.0, is_day=1, temp=25.0))
-    assert r.status in ("OK", "INTERPOLATED")
-    assert r.ac_mw < spec.solar_ac_mw
+    assert r.status == "CLIPPED"
+    assert abs(r.ac_mw - spec.solar_ac_mw) < 1e-6
 
 
 def test_solar_partial_irradiance_below_cap(spec):
