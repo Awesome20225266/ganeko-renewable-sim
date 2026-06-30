@@ -38,6 +38,27 @@ def get_blocks_range(
     return list(db.scalars(q))
 
 
+def get_present_dates(
+    db: Session, plant_code: str, start: date, end: date, data_mode: str
+) -> set[date]:
+    """Distinct dates in [start, end] that already have current blocks for this mode.
+
+    Used by the backfill command to skip dates that are already simulated.
+    """
+    rows = db.scalars(
+        select(GenerationBlock.sim_date)
+        .where(
+            GenerationBlock.plant_code == plant_code,
+            GenerationBlock.sim_date >= start,
+            GenerationBlock.sim_date <= end,
+            GenerationBlock.data_mode == data_mode,
+            GenerationBlock.is_current.is_(True),
+        )
+        .distinct()
+    )
+    return set(rows)
+
+
 def get_weather_blocks(
     db: Session, plant_code: str, sim_date: date, data_mode: str | None = None
 ) -> list[WeatherBlock]:
