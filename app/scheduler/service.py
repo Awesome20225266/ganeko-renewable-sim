@@ -24,7 +24,7 @@ from app.config.settings import get_settings
 from app.db.base import session_scope
 from app.db.models import Plant
 from app.logging_conf import get_logger
-from app.simulate import run_simulation_sync
+from app.simulate import ensure_fresh_live, run_simulation_sync
 from app.weather.client import DataMode
 
 logger = get_logger(__name__)
@@ -86,14 +86,25 @@ def run_daily_job() -> None:
 
 
 def run_live_refresh() -> None:
-    """Re-run today's LIVE simulation for every active plant."""
-    for plant_code, tz in _active_plants():
-        today = datetime.now(ZoneInfo(tz)).date()
+    """Keep today's LIVE simulation fresh for every active plant.
+
+    Delegates to ensure_fresh_live rather than calling run_simulation_sync directly, so
+    this job shares the same per-plant lock, freshness gate and provider backoff as
+    consumer reads. Calling the simulation directly meant this job could collide with an
+    in-flight consumer refresh (duplicate-key error on weather_block, since both
+    delete-then-insert the same 96 rows) and that it kept calling a rate-limited provider
+    while every other caller was correctly backing off.
+    """
+    for plant_code, _tz in _active_plants():
         try:
-            run_simulation_sync(
-                plant_code, today, DataMode.LIVE,
-                triggered_by="scheduler", force_refetch=True,
-            )
+            result = ensure_fresh_live(plant_code)
+            if result.get("error"):
+                logger.error("Live refresh failed for plant=%s: %s", plant_code, result["error"])
+            elif result.get("provider_backoff"):
+                logger.info(
+                    "Live refresh skipped for plant=%s: provider backoff, retry in %ss",
+                    plant_code, result.get("retry_in_seconds"),
+                )
         except Exception as exc:  # noqa: BLE001
             logger.error("Live refresh failed for plant=%s: %s", plant_code, exc)
 

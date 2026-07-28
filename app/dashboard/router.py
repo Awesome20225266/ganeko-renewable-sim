@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.repository import (
     get_blocks,
@@ -259,6 +260,16 @@ async def dashboard_generate(code: str, date: str, mode: str = "HISTORICAL"):
         summary = await run_simulation(code, d, m, triggered_by="manual", force_refetch=True)
     except ValueError as e:
         raise HTTPException(404, str(e)) from None
+    except IntegrityError:
+        # Another simulation for this same plant/date/mode (a consumer read or the
+        # scheduler) committed its 96 blocks while this one was running, and both
+        # delete-then-insert the same uq_weather_block rows. Nothing is wrong with the
+        # data — the other run's results are already stored.
+        raise HTTPException(
+            409,
+            f"A simulation for {d.isoformat()} {m.value} is already running — "
+            "its results are being saved. Click View in a moment.",
+        ) from None
     except WeatherFetchError as e:
         # Without this the RuntimeError escaped unhandled and the browser received
         # Starlette's plain-text "Internal Server Error", which the console reported as

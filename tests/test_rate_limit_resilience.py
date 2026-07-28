@@ -339,3 +339,27 @@ def test_daily_job_continues_after_a_failing_step(monkeypatch):
     assert modes.count("FORECAST") == sched.FORECAST_HORIZON_DAYS, (
         "the forecast horizon must still be built when the LIVE step fails"
     )
+
+
+def test_live_refresh_job_shares_the_backoff(monkeypatch):
+    """The 15-min refresh job must go through ensure_fresh_live, not around it.
+
+    Calling run_simulation_sync directly let this job collide with an in-flight consumer
+    refresh (both delete-then-insert the same uq_weather_block rows) and kept hitting a
+    rate-limited provider while every other caller was backing off.
+    """
+    from app.scheduler import service as sched
+
+    seen: list[str] = []
+    monkeypatch.setattr(sched, "_active_plants", lambda: [(PLANT, "Asia/Kolkata")])
+    monkeypatch.setattr(
+        sched, "ensure_fresh_live",
+        lambda plant, *a, **kw: seen.append(plant) or {"refreshed": False},
+    )
+
+    def fail_if_called(*_a, **_kw):  # pragma: no cover - must not run
+        raise AssertionError("live refresh must not bypass ensure_fresh_live")
+
+    monkeypatch.setattr(sched, "run_simulation_sync", fail_if_called)
+    sched.run_live_refresh()
+    assert seen == [PLANT]
