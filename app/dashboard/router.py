@@ -24,7 +24,7 @@ from app.db.base import session_scope
 from app.db.models import ApiKey, WeatherBlock
 from app.services import create_api_key, create_config_version, revoke_api_key
 from app.simulate import ensure_fresh_live, load_active_config, run_simulation
-from app.weather.client import DataMode
+from app.weather.client import DataMode, WeatherFetchError
 
 router = APIRouter(tags=["dashboard"])
 
@@ -259,12 +259,26 @@ async def dashboard_generate(code: str, date: str, mode: str = "HISTORICAL"):
         summary = await run_simulation(code, d, m, triggered_by="manual", force_refetch=True)
     except ValueError as e:
         raise HTTPException(404, str(e)) from None
+    except WeatherFetchError as e:
+        # Without this the RuntimeError escaped unhandled and the browser received
+        # Starlette's plain-text "Internal Server Error", which the console reported as
+        # "Unexpected token 'I' ... is not valid JSON" — hiding the real cause.
+        detail = (
+            "Weather provider rate limit reached (HTTP 429) and no stored weather covers "
+            f"{d.isoformat()}. The free Open-Meteo quota resets at 00:00 UTC (05:30 IST); "
+            "live data recovers automatically."
+            if e.is_rate_limited
+            else f"Weather provider unavailable: {e}"
+        )
+        raise HTTPException(503, detail) from None
     return {
         "date": d.isoformat(),
         "mode": summary.mode,
         "data_label": summary.data_label,
         "quality_status": summary.quality_status,
         "blocks_written": summary.blocks_written,
+        "weather_source": summary.weather_source,
+        "stale_weather": summary.weather_from_cache,
         "total_mwh": round(summary.total_mwh, 2),
         "solar_mwh": round(summary.solar_mwh, 2),
         "wind_mwh": round(summary.wind_mwh, 2),

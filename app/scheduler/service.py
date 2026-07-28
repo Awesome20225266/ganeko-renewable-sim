@@ -46,28 +46,43 @@ def _plant_tz(plant_code: str) -> str:
 
 
 def run_daily_job() -> None:
-    """Finalize yesterday, refresh today, and build the forecast horizon."""
+    """Finalize yesterday, refresh today, and build the forecast horizon.
+
+    Every step is isolated: one failing date must not skip the rest. Sharing a single
+    try/except here previously meant a rate-limited LIVE step silently cancelled the whole
+    forecast horizon, so the horizon decayed to nothing while historical kept working.
+    """
     logger.info("Daily job starting")
     for plant_code, tz in _active_plants():
         today = datetime.now(ZoneInfo(tz)).date()
-        yesterday = today - timedelta(days=1)
-        try:
-            run_simulation_sync(
-                plant_code, yesterday, DataMode.HISTORICAL,
-                triggered_by="scheduler", force_refetch=True,
-            )
-            run_simulation_sync(
-                plant_code, today, DataMode.LIVE,
-                triggered_by="scheduler", force_refetch=True,
-            )
-            for h in range(1, FORECAST_HORIZON_DAYS + 1):
+        steps: list[tuple[date, DataMode]] = [
+            (today - timedelta(days=1), DataMode.HISTORICAL),
+            (today, DataMode.LIVE),
+        ]
+        steps += [
+            (today + timedelta(days=h), DataMode.FORECAST)
+            for h in range(1, FORECAST_HORIZON_DAYS + 1)
+        ]
+        failures: list[str] = []
+        for sim_date, mode in steps:
+            try:
                 run_simulation_sync(
-                    plant_code, today + timedelta(days=h), DataMode.FORECAST,
+                    plant_code, sim_date, mode,
                     triggered_by="scheduler", force_refetch=True,
                 )
+            except Exception as exc:  # noqa: BLE001 — continue with the remaining steps
+                failures.append(f"{sim_date} {mode.value}: {exc}")
+                logger.error(
+                    "Daily job step failed plant=%s date=%s mode=%s: %s",
+                    plant_code, sim_date, mode.value, exc,
+                )
+        if failures:
+            logger.error(
+                "Daily job finished for plant=%s with %d/%d step(s) failed: %s",
+                plant_code, len(failures), len(steps), "; ".join(failures),
+            )
+        else:
             logger.info("Daily job done for plant=%s", plant_code)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Daily job failed for plant=%s: %s", plant_code, exc)
 
 
 def run_live_refresh() -> None:

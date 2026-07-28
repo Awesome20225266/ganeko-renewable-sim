@@ -26,6 +26,23 @@ class DataMode(str, Enum):
     FORECAST = "FORECAST"
 
 
+class WeatherFetchError(RuntimeError):
+    """A weather fetch failed. Carries the provider HTTP status when there was one.
+
+    Subclasses RuntimeError so existing `except RuntimeError` handlers (CLI backfill,
+    schedulers) keep working unchanged; callers that care can branch on `.status_code`
+    / `.is_rate_limited` to fall back to cached weather instead of failing the day.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None):
+        self.status_code = status_code
+        super().__init__(message)
+
+    @property
+    def is_rate_limited(self) -> bool:
+        return self.status_code == 429
+
+
 # Variable plans -------------------------------------------------------------
 # Hourly variables are always available across forecast / historical-forecast.
 HOURLY_SOLAR = [
@@ -216,10 +233,25 @@ async def _get_with_retry(
 ) -> httpx.Response:
     delay = 1.0
     last_exc: Exception | None = None
+    last_status: int | None = None
     for attempt in range(1, max_retries + 1):
         try:
             resp = await client.get(url, params=params)
-            if resp.status_code == 429 or resp.status_code >= 500:
+            if resp.status_code == 429:
+                # Rate/quota limit. Open-Meteo's smallest bucket is per-minute and its
+                # daily quota resets at 00:00 UTC, so retrying inside our few-second
+                # budget can never succeed — it only spends 4x the quota that caused the
+                # limit in the first place. Fail fast and let the caller back off and
+                # serve cached weather instead.
+                logger.warning(
+                    "Open-Meteo 429 rate limit (Retry-After=%s); not retrying",
+                    resp.headers.get("Retry-After"),
+                )
+                raise WeatherFetchError(
+                    "Weather provider rate limit reached (HTTP 429)", 429
+                )
+            if resp.status_code >= 500:
+                last_status = resp.status_code
                 last_exc = httpx.HTTPStatusError(
                     f"status {resp.status_code}", request=resp.request, response=resp
                 )
@@ -244,7 +276,9 @@ async def _get_with_retry(
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
-    raise RuntimeError(f"Open-Meteo request failed after {max_retries} attempts") from last_exc
+    raise WeatherFetchError(
+        f"Open-Meteo request failed after {max_retries} attempts", last_status
+    ) from last_exc
 
 
 async def fetch_weather(
