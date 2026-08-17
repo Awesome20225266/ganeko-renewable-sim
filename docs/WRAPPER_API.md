@@ -41,7 +41,14 @@ All requests send the **wrapper user key** (not the provider key):
 | `GET /api/renewable/range?start=YYYY-MM-DD&end=YYYY-MM-DD` | Block range (≤ 31 days) |
 | `GET /api/renewable/summary?date=YYYY-MM-DD` | Daily totals (single date) |
 | `GET /api/renewable/summary?start=…&end=…` | Daily totals (range) |
-| `GET /api/renewable/schedule?date=YYYY-MM-DD` | Day-ahead **P90 schedule** — solar, wind and total, 96 blocks |
+| `GET /api/renewable/schedule?date=YYYY-MM-DD` | Day-ahead **P90 schedule** — solar, wind and total, 96 blocks. Serves up to **tomorrow (X+1)**; carries its own `data_policy` of `DAY_AHEAD_SCHEDULE_UPTO_X_PLUS_1` |
+
+> **Why `/schedule` is the one route that looks forward.** A schedule is
+> published *before* the day it describes — that is what makes it a schedule, so
+> X+1 is the point of it. Every actual-data route stays capped at today, because
+> actual generation cannot exist for a future date. Beyond X+1 is refused: those
+> schedules were anchored on a multi-day-out forecast, and serving them would
+> present a stale anchor as if it were day-ahead.
 
 Add `&format=csv` to `current`, `today-completed-blocks`, `historical`, and `range`
 for flat, Excel-friendly CSV.

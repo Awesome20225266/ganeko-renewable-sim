@@ -33,7 +33,8 @@ from app.schedule import ensure_schedule  # noqa: E402
 
 ADMIN = {"X-API-Key": "test-admin-key"}
 PAST = date.today() - timedelta(days=3)
-FUTURE = date.today() + timedelta(days=2)
+TOMORROW = date.today() + timedelta(days=1)      # X+1 — the day-ahead schedule
+FUTURE = date.today() + timedelta(days=2)        # X+2 — beyond the cap
 
 
 def wrapper_headers() -> dict:
@@ -84,8 +85,10 @@ def _seed_generation(sim_date: date, mode: str = "HISTORICAL") -> None:
 def client():
     run_seed()
     _seed_generation(PAST, "HISTORICAL")
+    _seed_generation(TOMORROW, "FORECAST")
     _seed_generation(FUTURE, "FORECAST")
     ensure_schedule("HYBRID01", PAST)
+    ensure_schedule("HYBRID01", TOMORROW)
     ensure_schedule("HYBRID01", FUTURE)
     with TestClient(app) as c:
         yield c
@@ -164,10 +167,50 @@ def test_wrapper_serves_past_schedule(client):
     assert {"solar_p90_mw", "wind_p90_mw", "total_p90_mw"} <= set(d["blocks"][0])
 
 
-def test_wrapper_rejects_future_schedule(client):
-    """The wrapper promises no forward-looking data; a future schedule is exactly that."""
+def test_wrapper_serves_tomorrow(client):
+    """X+1 is the whole point of a day-ahead schedule — it must be reachable."""
+    r = client.get(f"/api/renewable/schedule?date={TOMORROW}", headers=wrapper_headers())
+    assert r.status_code == 200
+    assert len(r.json()["blocks"]) == 96
+
+
+def test_wrapper_rejects_beyond_tomorrow(client):
+    """X+2 was anchored on a multi-day-out forecast; serving it would present a
+    stale anchor as a day-ahead schedule."""
     r = client.get(f"/api/renewable/schedule?date={FUTURE}", headers=wrapper_headers())
     assert r.status_code == 400
+
+
+def test_wrapper_schedule_has_its_own_policy_label(client):
+    """The actual-data promise must stay literally true on the routes it describes."""
+    sched = client.get(f"/api/renewable/schedule?date={PAST}", headers=wrapper_headers()).json()
+    hist = client.get(f"/api/renewable/historical?date={PAST}", headers=wrapper_headers()).json()
+    assert sched["data_policy"] == "DAY_AHEAD_SCHEDULE_UPTO_X_PLUS_1"
+    assert hist["data_policy"] == "LIVE_AND_HISTORICAL_ONLY_NO_FORECAST"
+
+
+def test_wrapper_actual_routes_still_capped_at_today(client):
+    """Only /schedule looks forward; actual generation cannot exist for a future date."""
+    for path in (f"/api/renewable/historical?date={TOMORROW}",
+                 f"/api/renewable/range?start={PAST}&end={TOMORROW}",
+                 f"/api/renewable/summary?date={TOMORROW}"):
+        assert client.get(path, headers=wrapper_headers()).status_code == 400, path
+
+
+def test_keyed_schedule_serves_tomorrow_but_not_beyond(client):
+    assert client.get(f"/plants/HYBRID01/schedule?date={TOMORROW}",
+                      headers=ADMIN).status_code == 200
+    assert client.get(f"/plants/HYBRID01/schedule?date={FUTURE}",
+                      headers=ADMIN).status_code == 400
+
+
+def test_keyed_range_capped_at_tomorrow(client):
+    assert client.get(
+        f"/plants/HYBRID01/schedule/range?start={PAST}&end={TOMORROW}",
+        headers=ADMIN).status_code == 200
+    assert client.get(
+        f"/plants/HYBRID01/schedule/range?start={PAST}&end={FUTURE}",
+        headers=ADMIN).status_code == 400
 
 
 def test_wrapper_csv_export(client):

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -30,6 +30,11 @@ router = APIRouter(
 )
 
 DATA_POLICY = "LIVE_AND_HISTORICAL_ONLY_NO_FORECAST"
+# The schedule route carries its OWN policy label. A day-ahead schedule is
+# published before the day it describes — that is what makes it a schedule — so
+# it legitimately serves X+1, which the actual-data routes never do. Reusing the
+# label above would make the response claim something untrue of that route.
+SCHEDULE_POLICY = "DAY_AHEAD_SCHEDULE_UPTO_X_PLUS_1"
 BLOCKED = provider.BLOCKED_LABEL
 MAX_RANGE_DAYS = 31
 
@@ -224,20 +229,27 @@ def block_range(
 # --- 5) day-ahead P90 schedule (dates <= today only) ------------------------
 @router.get("/schedule")
 def schedule(
-    date_str: str = Query(..., alias="date", description="YYYY-MM-DD (not in the future)"),
+    date_str: str = Query(..., alias="date", description="YYYY-MM-DD (up to tomorrow)"),
     fmt: str = Query("json", alias="format", pattern="^(json|csv)$"),
 ):
-    """Day-ahead P90 schedule for a completed/current date — solar, wind, total.
+    """Day-ahead P90 schedule — solar, wind and hybrid total, 96 blocks.
 
-    Restricted to dates <= today. The schedule for a FUTURE date is forward-looking
-    data, which this wrapper does not serve; use the key-protected /plants API for
-    that. Today and past dates are schedules that were already issued day-ahead,
-    so returning them keeps the LIVE_AND_HISTORICAL_ONLY policy intact.
+    Serves up to TOMORROW (X+1) and no further. A schedule is published before
+    the day it describes, so X+1 is the point of it; but anything beyond X+1 was
+    anchored on a multi-day-out forecast, and serving that would present a stale
+    anchor as a day-ahead schedule.
+
+    This is the only route here that looks forward — every actual-data route is
+    still capped at today, because actual generation cannot exist for a future
+    date. Hence the separate policy label.
     """
     plant = _plant()
     d = _parse_date(date_str, "date")
-    if d > _today():
-        raise HTTPException(400, "Future dates are not allowed for schedule data.")
+    limit = _today() + timedelta(days=1)
+    if d > limit:
+        raise HTTPException(
+            400, f"Schedules are day-ahead only: the latest available date is {limit}."
+        )
     data = _guard(provider.fetch_schedule, plant, d.isoformat())
     rows = [{**b, "sim_date": data.get("sim_date")} for b in (data.get("blocks") or [])]
     if fmt == "csv":
@@ -245,7 +257,7 @@ def schedule(
     return {
         "plant_id": plant,
         "date": d.isoformat(),
-        "data_policy": DATA_POLICY,
+        "data_policy": SCHEDULE_POLICY,
         "schedule_version": data.get("schedule_version"),
         "issued_at": data.get("issued_at"),
         "blocks": rows,

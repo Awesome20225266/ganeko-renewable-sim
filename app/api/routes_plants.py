@@ -401,6 +401,17 @@ def _schedule_series(rows, code: str, sim_date: date) -> ScheduleSeriesOut:
     )
 
 
+def _max_schedule_date(db, code: str) -> date:
+    """Furthest date a schedule may be served for: tomorrow, plant-local.
+
+    Strictly day-ahead. Schedules further out exist in storage but are not
+    served: they were anchored on a multi-day-out forecast, so exposing them
+    would present a stale anchor as if it were a day-ahead schedule.
+    """
+    cfg = load_active_config(db, code)
+    return datetime.now(ZoneInfo(cfg.timezone)).date() + timedelta(days=1)
+
+
 @router.get("/{code}/schedule", response_model=ScheduleSeriesOut)
 def schedule(
     code: str,
@@ -409,10 +420,16 @@ def schedule(
 ):
     """Day-ahead P90 schedule — 96 blocks of solar, wind and hybrid total.
 
-    Issued once per date and then frozen, so a schedule already published does
-    not move when today's live simulation re-runs.
+    Serves up to tomorrow (X+1) only. Issued once per date and then frozen, so a
+    schedule already published does not move when the live simulation re-runs.
     """
     with session_scope() as db:
+        limit = _max_schedule_date(db, code)
+        if sim_date > limit:
+            raise HTTPException(
+                400,
+                f"Schedules are day-ahead only: the latest available date is {limit}.",
+            )
         rows = get_schedule(db, code, sim_date)
         if not rows:
             raise HTTPException(
@@ -430,10 +447,20 @@ def schedule_range(
     end: date = Query(...),
     ctx: AuthContext = Depends(require_read),
 ):
-    """Day-ahead P90 schedules over a date range, grouped per day (max 31 days)."""
+    """Day-ahead P90 schedules over a date range, grouped per day (max 31 days).
+
+    The range may extend no further than tomorrow (X+1), same rule as the
+    single-date endpoint.
+    """
     if (end - start).days > 31:
         raise HTTPException(400, "Range too large; max 31 days.")
     with session_scope() as db:
+        limit = _max_schedule_date(db, code)
+        if end > limit:
+            raise HTTPException(
+                400,
+                f"Schedules are day-ahead only: the latest available date is {limit}.",
+            )
         rows = get_schedule_range(db, code, start, end)
         if not rows:
             raise HTTPException(404, f"No schedules for {code} in range.")

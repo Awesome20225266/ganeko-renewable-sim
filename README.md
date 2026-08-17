@@ -127,7 +127,18 @@ curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/schedule/accuracy?date=2026-06-25"
 
 These use the **same API keys** as every other `/plants` endpoint — nothing to
 re-issue. The restricted wrapper exposes `GET /api/renewable/schedule?date=…`
-for dates **≤ today** only, so its no-forecast policy still holds.
+with the same rule.
+
+**Schedules are served up to tomorrow (X+1) and no further.** A schedule is
+published before the day it describes, so X+1 is the point of it — but anything
+beyond X+1 was anchored on a multi-day-out forecast, and serving that would
+present a stale anchor as a day-ahead schedule. Every *actual*-data endpoint
+stays capped at today, because actual generation cannot exist for a future date.
+
+**When to pull:** the daily job runs at `SCHEDULER_DAILY_TIME` (00:30 plant-local)
+and issues tomorrow's schedule. Fetch it any time after that — it is frozen, so
+re-fetching returns identical numbers. Poll `/current` or `/live` for actual
+through the day and compare.
 
 Issue schedules manually (the daily job issues today..+7 automatically):
 ```bash

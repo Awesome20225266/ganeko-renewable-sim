@@ -78,7 +78,12 @@ class Settings(BaseSettings):
     # re-simulation cannot move a schedule already published.
     SCHEDULE_ENABLED: bool = True
     SCHEDULE_VERSION: str = "p90-v1.0.0"
-    SCHEDULE_HORIZON_DAYS: int = 7          # how far ahead the daily job issues
+    # How far ahead the daily job issues. MUST stay at 1 for genuine day-ahead
+    # semantics: because a schedule freezes on first issue, a horizon of N means
+    # a date's schedule is created N days early and anchored on an N-day-out
+    # forecast. At N=1 each date is issued at 00:30 the day before, off the
+    # freshest forecast — which is what the accuracy model is calibrated for.
+    SCHEDULE_HORIZON_DAYS: int = 1
     # Master accuracy knob. 1.15 -> ~10% MAPE / ~2% nMAE of capacity ("P90" =
     # ~90% accurate). Raise for a looser schedule, lower for a tighter one.
     SCHEDULE_SIGMA_SCALE: float = 1.15
