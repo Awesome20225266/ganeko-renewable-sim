@@ -519,6 +519,8 @@ function shareText(key, opts){
   // A recent past date for examples (today - 5 days), so curl samples return data.
   const past = new Date(Date.now() - 5*86400000).toISOString().slice(0,10);
   const future = new Date(Date.now() + 3*86400000).toISOString().slice(0,10);
+  // Schedules are served to X+1 only, so the sample must not use `future` (X+3).
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
   const keyNote = opts.prefix
     ? `API key  : <YOUR_API_KEY>   (the key starting "${opts.prefix}" — its secret was shown ONLY once,
            when it was created. Paste that saved secret here; it cannot be retrieved again.)`
@@ -589,6 +591,48 @@ ENDPOINTS  (replace the key in the header; all are GET)
    GET /plants/${c}/config
    curl -H "X-API-Key: ${key}" ${ORIGIN}/plants/${c}/config
 
+9) P90 DAY-AHEAD SCHEDULE — 96 blocks of solar, wind AND hybrid total.
+   GET /plants/${c}/schedule?date=YYYY-MM-DD
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/schedule?date=${tomorrow}"
+   Returns per block: solar_p90_mw, wind_p90_mw, total_p90_mw,
+            solar_p90_mwh, wind_p90_mwh, total_p90_mwh,
+            and *_band_low_mw / *_band_high_mw (the uncertainty envelope).
+   Also: schedule_version, anchor_mode, issued_at, and day totals
+            solar_p90_mwh_total / wind_p90_mwh_total / total_p90_mwh_total.
+
+   DATE RANGE: today (X) and tomorrow (X+1) ONLY. A schedule is published
+   before the day it describes, so X+1 is the point of it; anything beyond
+   X+1 returns HTTP 400. Every OTHER endpoint above that returns actual data
+   is capped at today, because actual generation cannot exist for a future date.
+
+   WHEN TO PULL: tomorrow's schedule is issued at 00:30 plant-local time.
+   Fetch it any time after that — it is FROZEN once issued, so re-fetching
+   returns identical numbers. Poll endpoint 1 or 2 for actual through the day
+   and compare against the schedule.
+
+10) SCHEDULE RANGE — schedules across several days (max 31, up to X+1).
+   GET /plants/${c}/schedule/range?start=YYYY-MM-DD&end=YYYY-MM-DD
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/schedule/range?start=${past}&end=${today}"
+
+11) SCHEDULE ACCURACY — schedule vs actual deviation for a completed date.
+   GET /plants/${c}/schedule/accuracy?date=YYYY-MM-DD
+   curl -H "X-API-Key: ${key}" "${ORIGIN}/plants/${c}/schedule/accuracy?date=${past}"
+   Returns: nmae_pct_capacity, mape_pct, blocks_within_10pct_band,
+            blocks_within_15pct_band, actual_mwh, scheduled_mwh,
+            day_deviation_pct.
+   Note: nMAE and the band counts are normalised to INSTALLED CAPACITY, which
+   is how DSM deviation is assessed. A percentage-of-actual error is
+   arithmetically large and operationally meaningless at 06:00, when a solar
+   plant is producing 1 MW.
+
+ABOUT THE P90 SCHEDULE
+----------------------------------------------------------------
+A day-ahead schedule derived from the simulated generation, carrying a
+realistic forecast error that is deliberately NOT uniform across the day:
+tight through a clear midday, wider on the sunrise/sunset ramps, widest during
+cloud and wind episodes. It is reproducible — the same date always yields the
+same schedule — and frozen once issued.
+
 BLOCK FIELDS (endpoints 2,3,4,6 -> each item in "blocks")
 ----------------------------------------------------------------
   block_no (1–96), block_start, block_end,
@@ -618,7 +662,22 @@ s = requests.get(f"{BASE}/plants/${c}/summary", headers=H,
                  params={"date": "${past}"}).json()
 print(s["summaries"][0]["total_mwh"], "MWh")
 
-# d) poll the live reading every 15 min
+# d) tomorrow's P90 day-ahead schedule (pull once, after 00:30 plant-local)
+sch = requests.get(f"{BASE}/plants/${c}/schedule", headers=H,
+                   params={"date": "${tomorrow}"}).json()
+print("scheduled tomorrow:", sch["total_p90_mwh_total"], "MWh",
+      "| solar", sch["solar_p90_mwh_total"], "| wind", sch["wind_p90_mwh_total"])
+for b in sch["blocks"][:3]:
+    print(b["block_start"], b["solar_p90_mw"], b["wind_p90_mw"], b["total_p90_mw"])
+
+# e) how well yesterday's schedule matched actual
+acc = requests.get(f"{BASE}/plants/${c}/schedule/accuracy", headers=H,
+                   params={"date": "${past}"}).json()
+print("nMAE", acc["nmae_pct_capacity"], "% of capacity |",
+      acc["blocks_within_10pct_band"], "% of blocks inside +/-10% band |",
+      "day deviation", acc["day_deviation_pct"], "%")
+
+# f) poll the live reading every 15 min
 import time
 while True:
     r = requests.get(f"{BASE}/plants/${c}/current", headers=H).json()
@@ -632,6 +691,7 @@ ERRORS
   401  missing/invalid/expired key  -> check the X-API-Key header
   429  rate limit (120/min)         -> slow down / back off
   404  no data for that date/mode   -> generate it first or pick another date
+  400  schedule date beyond X+1     -> schedules are day-ahead only
 
 Interactive API explorer (try requests in the browser): ${ORIGIN}/docs
 `;
