@@ -72,6 +72,21 @@ class Settings(BaseSettings):
     # Set this to one value you hand to your users before sharing the wrapper.
     RENEWABLE_WRAPPER_USER_API_KEY: str = ""
 
+    # --- Day-ahead P90 schedule -------------------------------------------------
+    # Anchored on the simulated generation, carrying a realistic (non-uniform)
+    # day-ahead forecast error. Issued once per date then FROZEN, so today's live
+    # re-simulation cannot move a schedule already published.
+    SCHEDULE_ENABLED: bool = True
+    SCHEDULE_VERSION: str = "p90-v1.0.0"
+    SCHEDULE_HORIZON_DAYS: int = 7          # how far ahead the daily job issues
+    # Master accuracy knob. 1.15 -> ~10% MAPE / ~2% nMAE of capacity ("P90" =
+    # ~90% accurate). Raise for a looser schedule, lower for a tighter one.
+    SCHEDULE_SIGMA_SCALE: float = 1.15
+    # Bounds the worst sustained relative miss. Without it a tail excursion in the
+    # error process drives the schedule far below actual for hours on end.
+    SCHEDULE_REL_SIGMA_CAP: float = 0.32
+    SCHEDULE_DAY_ENERGY_CAP: float = 0.05   # max |day MWh deviation| vs actual
+
     # App
     LOG_LEVEL: str = "INFO"
     SIMULATION_VERSION: str = "v1.0.0"

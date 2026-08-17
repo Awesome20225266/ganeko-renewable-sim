@@ -86,6 +86,14 @@
       <div class="card kpi"><div class="v" id="kBlock">—</div><div class="l">Current block / 96</div></div>
       <div class="card kpi"><div class="v"><span id="liveQ" class="badge ok">—</span></div><div class="l">Data quality</div></div>
     </div>
+    <div class="grid kpis">
+      <div class="card kpi"><div class="v" id="kSchedNow">— MW</div><div class="l">P90 schedule now</div></div>
+      <div class="card kpi"><div class="v" id="kSchedDay">— MWh</div><div class="l">P90 scheduled today</div></div>
+      <div class="card kpi"><div class="v" id="kDev">—</div><div class="l">Day deviation vs actual</div></div>
+      <div class="card kpi"><div class="v" id="kNmae">—</div><div class="l">nMAE (% of capacity)</div></div>
+      <div class="card kpi"><div class="v" id="kBand">—</div><div class="l">Blocks inside ±10% band</div></div>
+      <div class="card kpi"><div class="v" id="kIssued">—</div><div class="l">Schedule issued</div></div>
+    </div>
     <div class="card" style="margin-bottom:16px;">
       <h2 id="liveHd">Today — Solar / Wind / Hybrid (15-min blocks) <span id="liveUpdated" style="font-size:0.7rem;font-weight:400;color:#90a0b8;margin-left:12px;"></span><button class="ghost" style="float:right;padding:4px 10px;font-size:12px" onclick="downloadLiveCSV()">⬇ Excel / CSV</button></h2>
       <div class="chartbox"><canvas id="genChart"></canvas></div>
@@ -94,6 +102,7 @@
         <span class="chip"><span class="sw" style="border-color:var(--wind)"></span>Wind</span>
         <span class="chip"><span class="sw" style="border-color:var(--total)"></span>Hybrid total</span>
         <span class="chip"><span class="sw dash" style="border-color:var(--muted)"></span>Forecast (remaining)</span>
+        <span class="chip"><span class="sw dash" style="border-color:#f0a202"></span>P90 schedule (day-ahead)</span>
         <span class="chip">▲ interpolated</span>
       </div>
     </div>
@@ -316,6 +325,9 @@ async function loadLive() {
   const mk=(k,col)=>({label:k,data:d.blocks.map(b=>b[k]),borderColor:col,backgroundColor:col,tension:.35,borderWidth:2,
     pointRadius:d.blocks.map(b=>b.interpolated?3:0),pointStyle:d.blocks.map(b=>b.interpolated?'triangle':'circle'),segment:{borderDash:dash},fill:false});
   const ds=[mk('solar_mw',css('--solar')),mk('wind_mw',css('--wind')),mk('total_mw',css('--total'))];
+  // Day-ahead P90 schedule overlaid on actual (solar, wind and hybrid total).
+  const sch = await loadSchedule(d.date, d.blocks.length, cur);
+  if (sch) ds.push(...sch);
   upsert('genChart',{type:'line',data:{labels,datasets:ds},options:baseOpts('MW')});
   const wx=[{label:'POA (W/m²)',data:d.blocks.map(b=>b.poa),borderColor:css('--solar'),yAxisID:'y',tension:.35,borderWidth:2,pointRadius:0},
     {label:'Wind100 (m/s)',data:d.blocks.map(b=>b.wind_speed),borderColor:css('--wind'),yAxisID:'y1',tension:.35,borderWidth:2,pointRadius:0},
@@ -323,6 +335,38 @@ async function loadLive() {
   upsert('wxLiveChart',{type:'line',data:{labels,datasets:wx},options:dualOpts()});
   loadHistory();
 }
+// Fetch the frozen day-ahead P90 schedule and return chart datasets + KPIs.
+// Returns null (and blanks the KPIs) when no schedule has been issued yet, so a
+// missing schedule degrades quietly instead of breaking the Live tab.
+async function loadSchedule(date, nBlocks, cur){
+  const blank=()=>['kSchedNow','kSchedDay','kDev','kNmae','kBand','kIssued']
+    .forEach(id=>{const e=document.getElementById(id); if(e) e.textContent='—';});
+  let s;
+  try{
+    const r=await fetch(`/dashboard/api/schedule/${plant()}?date=${date}`);
+    if(!r.ok) throw new Error('no schedule'); s=await r.json();
+  }catch(e){ blank(); return null; }
+  if(!s.blocks || !s.blocks.length){ blank(); return null; }
+  window._schedData = s;   // kept for the Download Excel/CSV button
+
+  const now = s.blocks[Math.min(Math.max(cur,1),s.blocks.length)-1] || {};
+  document.getElementById('kSchedNow').textContent=(now.total_p90_mw??0).toFixed(1)+' MW';
+  document.getElementById('kSchedDay').textContent=(s.total_p90_mwh_total??0).toFixed(1)+' MWh';
+  const a=s.accuracy;
+  document.getElementById('kDev').textContent = a&&a.day_deviation_pct!=null
+    ? (a.day_deviation_pct>0?'+':'')+a.day_deviation_pct.toFixed(1)+'%' : '—';
+  document.getElementById('kNmae').textContent = a ? a.nmae_pct_capacity.toFixed(1)+'%' : '—';
+  document.getElementById('kBand').textContent = a ? a.blocks_within_10pct_band.toFixed(0)+'%' : '—';
+  document.getElementById('kIssued').textContent = s.issued_at
+    ? new Date(s.issued_at).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+
+  const line=(key,col,width)=>({label:key,data:s.blocks.map(b=>b[key]),borderColor:col,
+    backgroundColor:col,borderDash:[6,4],borderWidth:width,tension:.35,pointRadius:0,fill:false});
+  return [line('solar_p90_mw',css('--solar'),1.4),
+          line('wind_p90_mw',css('--wind'),1.4),
+          line('total_p90_mw','#f0a202',2.2)];
+}
+
 async function loadHistory(){
   let h; try{ h=await(await fetch(`/dashboard/api/history/${plant()}?days=7`)).json(); }catch{ return; }
   const labels=h.summaries.map(s=>s.date);
@@ -348,7 +392,22 @@ async function exploreView(){
   eSCuf.textContent=(s.solar_cuf??0)+'%'; eWCuf.textContent=(s.wind_cuf??0)+'%'; eYield.textContent=(s.solar_specific_yield??0);
   const labels=r.blocks.map(b=>b.time);
   const mk=(k,col)=>({label:k,data:r.blocks.map(b=>b[k]),borderColor:col,backgroundColor:col,tension:.35,borderWidth:2,pointRadius:0,fill:false});
-  upsert('expChart',{type:'line',data:{labels,datasets:[mk('solar_mw',css('--solar')),mk('wind_mw',css('--wind')),mk('total_mw',css('--total'))]},options:baseOpts('MW')});
+  const eds=[mk('solar_mw',css('--solar')),mk('wind_mw',css('--wind')),mk('total_mw',css('--total'))];
+  // Overlay the day-ahead P90 schedule for this date, if one was issued.
+  try{
+    const sr=await fetch(`/dashboard/api/schedule/${plant()}?date=${d}`);
+    if(sr.ok){
+      const s=await sr.json();
+      if(s.blocks && s.blocks.length){
+        const line=(k,col,w)=>({label:k,data:s.blocks.map(b=>b[k]),borderColor:col,
+          backgroundColor:col,borderDash:[6,4],borderWidth:w,tension:.35,pointRadius:0,fill:false});
+        eds.push(line('solar_p90_mw',css('--solar'),1.4),
+                 line('wind_p90_mw',css('--wind'),1.4),
+                 line('total_p90_mw','#f0a202',2.2));
+      }
+    }
+  }catch(e){ /* no schedule for this date — show actual only */ }
+  upsert('expChart',{type:'line',data:{labels,datasets:eds},options:baseOpts('MW')});
 }
 async function exploreGenerate(){
   const d=document.getElementById('expDate').value, m=document.getElementById('expMode').value;

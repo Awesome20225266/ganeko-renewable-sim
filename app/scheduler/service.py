@@ -76,6 +76,23 @@ def run_daily_job() -> None:
                     "Daily job step failed plant=%s date=%s mode=%s: %s",
                     plant_code, sim_date, mode.value, exc,
                 )
+        # Issue day-ahead P90 schedules for the horizon. Isolated per date and
+        # wrapped as a whole: a schedule failure must never affect the simulation
+        # steps above, which are what the existing APIs serve.
+        settings = get_settings()
+        if settings.SCHEDULE_ENABLED:
+            from app.schedule import ensure_schedule
+
+            for h in range(0, settings.SCHEDULE_HORIZON_DAYS + 1):
+                sched_date = today + timedelta(days=h)
+                try:
+                    ensure_schedule(plant_code, sched_date)
+                except Exception as exc:  # noqa: BLE001 — never break the daily job
+                    logger.warning(
+                        "Schedule issue failed plant=%s date=%s: %s",
+                        plant_code, sched_date, exc,
+                    )
+
         if failures:
             logger.error(
                 "Daily job finished for plant=%s with %d/%d step(s) failed: %s",

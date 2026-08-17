@@ -174,6 +174,55 @@ class SummaryListOut(BaseModel):
     summaries: list[DailySummaryOut]
 
 
+# ---- Day-ahead P90 schedule ------------------------------------------------
+class ScheduleBlockOut(BaseModel):
+    """One 15-minute schedule block: P90 for solar, wind and the hybrid total."""
+
+    block_no: int
+    block_start: datetime
+    block_end: datetime
+    solar_p90_mw: float
+    wind_p90_mw: float
+    total_p90_mw: float
+    solar_p90_mwh: float
+    wind_p90_mwh: float
+    total_p90_mwh: float
+    solar_band_low_mw: float
+    solar_band_high_mw: float
+    wind_band_low_mw: float
+    wind_band_high_mw: float
+    total_band_low_mw: float
+    total_band_high_mw: float
+
+
+class ScheduleSeriesOut(BaseModel):
+    plant_code: str
+    sim_date: date
+    schedule_version: str
+    anchor_mode: str
+    issued_at: datetime
+    block_count: int
+    solar_p90_mwh_total: float
+    wind_p90_mwh_total: float
+    total_p90_mwh_total: float
+    blocks: list[ScheduleBlockOut]
+
+
+class ScheduleAccuracyOut(BaseModel):
+    """Schedule-vs-actual comparison. nMAE and band counts are % of CAPACITY."""
+
+    plant_code: str
+    sim_date: date
+    blocks_compared: int
+    nmae_pct_capacity: float
+    mape_pct: float | None = None
+    blocks_within_10pct_band: float
+    blocks_within_15pct_band: float
+    actual_mwh: float
+    scheduled_mwh: float
+    day_deviation_pct: float | None = None
+
+
 # ---- Admin ----------------------------------------------------------------
 class ReprocessRequest(BaseModel):
     plant_code: str

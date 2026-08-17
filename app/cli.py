@@ -54,6 +54,19 @@ def main(argv: list[str] | None = None) -> int:
         help="List the dates that would be processed/skipped, then exit (no writes)",
     )
 
+    p_sch = sub.add_parser(
+        "schedule",
+        help="Issue the day-ahead P90 schedule for a date or range. Existing "
+        "schedules are left frozen unless --force.",
+    )
+    p_sch.add_argument("--plant", default=None)
+    p_sch.add_argument("--date", type=_parse_date, help="Single date (YYYY-MM-DD)")
+    p_sch.add_argument("--start", type=_parse_date, help="Range start (inclusive)")
+    p_sch.add_argument("--end", type=_parse_date, help="Range end (inclusive)")
+    p_sch.add_argument(
+        "--force", action="store_true", help="Re-issue schedules that already exist"
+    )
+
     sub.add_parser("run-daily", help="Run the daily scheduler job once")
     sub.add_parser("live-refresh", help="Run the live-refresh job once")
 
@@ -174,6 +187,45 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {d}: {msg}")
             return 1
         return 0
+
+    if args.cmd == "schedule":
+        from app.schedule import ScheduleError, ensure_schedule
+
+        plant = args.plant or default_plant
+        if args.date:
+            dates = [args.date]
+        elif args.start and args.end:
+            if args.start > args.end:
+                print("ERROR: --start must be on or before --end")
+                return 2
+            dates = [
+                args.start + timedelta(days=i)
+                for i in range((args.end - args.start).days + 1)
+            ]
+        else:
+            print("ERROR: provide --date, or both --start and --end")
+            return 2
+
+        issued, frozen, failed = 0, 0, []
+        for d in dates:
+            try:
+                res = ensure_schedule(plant, d, force=args.force)
+            except (ScheduleError, ValueError) as exc:
+                failed.append((d, str(exc)))
+                print(f"  {d} SKIPPED: {exc}")
+                continue
+            if res.get("issued"):
+                issued += 1
+                print(
+                    f"  {d} issued (anchor={res['anchor_mode']}) "
+                    f"solar={res['solar_mwh']:.1f} wind={res['wind_mwh']:.1f} "
+                    f"total={res['total_mwh']:.1f} MWh"
+                )
+            else:
+                frozen += 1
+                print(f"  {d} unchanged ({res.get('reason')}) — use --force to re-issue")
+        print(f"\nSchedule: {issued} issued, {frozen} unchanged, {len(failed)} skipped.")
+        return 1 if failed else 0
 
     if args.cmd == "run-daily":
         from app.scheduler.service import run_daily_job

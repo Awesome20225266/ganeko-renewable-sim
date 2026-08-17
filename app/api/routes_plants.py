@@ -21,6 +21,9 @@ from app.api.schemas import (
     DailySummaryOut,
     PlantConfigOut,
     PlantConfigUpdate,
+    ScheduleAccuracyOut,
+    ScheduleBlockOut,
+    ScheduleSeriesOut,
     SummaryListOut,
     WeatherBlockOut,
     WeatherSeriesOut,
@@ -28,6 +31,8 @@ from app.api.schemas import (
 from app.config.settings import get_settings
 from app.db.base import session_scope
 from app.db.models import DailySummary, GenerationBlock, PlantConfig, SimulationVersion
+from app.schedule import accuracy as schedule_accuracy
+from app.schedule import get_schedule, get_schedule_range
 from app.services import create_config_version
 from app.simulate import ensure_fresh_live, load_active_config
 
@@ -356,6 +361,102 @@ def summary(
             count=len(rows),
             summaries=[_summary_to_out(s) for s in rows],
         )
+
+
+# --------------------------------------------------------------------------- #
+# Day-ahead P90 schedule (additive — existing endpoints are unchanged)
+# --------------------------------------------------------------------------- #
+def _schedule_block_to_out(s) -> ScheduleBlockOut:
+    return ScheduleBlockOut(
+        block_no=s.block_no,
+        block_start=s.block_start,
+        block_end=s.block_end,
+        solar_p90_mw=round(s.solar_p90_mw, 4),
+        wind_p90_mw=round(s.wind_p90_mw, 4),
+        total_p90_mw=round(s.total_p90_mw, 4),
+        solar_p90_mwh=round(s.solar_p90_mwh, 5),
+        wind_p90_mwh=round(s.wind_p90_mwh, 5),
+        total_p90_mwh=round(s.total_p90_mwh, 5),
+        solar_band_low_mw=round(s.solar_band_low_mw, 4),
+        solar_band_high_mw=round(s.solar_band_high_mw, 4),
+        wind_band_low_mw=round(s.wind_band_low_mw, 4),
+        wind_band_high_mw=round(s.wind_band_high_mw, 4),
+        total_band_low_mw=round(s.total_band_low_mw, 4),
+        total_band_high_mw=round(s.total_band_high_mw, 4),
+    )
+
+
+def _schedule_series(rows, code: str, sim_date: date) -> ScheduleSeriesOut:
+    return ScheduleSeriesOut(
+        plant_code=code,
+        sim_date=sim_date,
+        schedule_version=rows[0].schedule_version,
+        anchor_mode=rows[0].anchor_mode,
+        issued_at=rows[0].issued_at,
+        block_count=len(rows),
+        solar_p90_mwh_total=round(sum(r.solar_p90_mwh for r in rows), 3),
+        wind_p90_mwh_total=round(sum(r.wind_p90_mwh for r in rows), 3),
+        total_p90_mwh_total=round(sum(r.total_p90_mwh for r in rows), 3),
+        blocks=[_schedule_block_to_out(r) for r in rows],
+    )
+
+
+@router.get("/{code}/schedule", response_model=ScheduleSeriesOut)
+def schedule(
+    code: str,
+    sim_date: date = Query(..., alias="date", description="Schedule date (YYYY-MM-DD)"),
+    ctx: AuthContext = Depends(require_read),
+):
+    """Day-ahead P90 schedule — 96 blocks of solar, wind and hybrid total.
+
+    Issued once per date and then frozen, so a schedule already published does
+    not move when today's live simulation re-runs.
+    """
+    with session_scope() as db:
+        rows = get_schedule(db, code, sim_date)
+        if not rows:
+            raise HTTPException(
+                404,
+                f"No schedule issued for {code} on {sim_date}. "
+                f"Issue one via `python -m app.cli schedule --date {sim_date}`.",
+            )
+        return _schedule_series(rows, code, sim_date)
+
+
+@router.get("/{code}/schedule/range", response_model=list[ScheduleSeriesOut])
+def schedule_range(
+    code: str,
+    start: date = Query(...),
+    end: date = Query(...),
+    ctx: AuthContext = Depends(require_read),
+):
+    """Day-ahead P90 schedules over a date range, grouped per day (max 31 days)."""
+    if (end - start).days > 31:
+        raise HTTPException(400, "Range too large; max 31 days.")
+    with session_scope() as db:
+        rows = get_schedule_range(db, code, start, end)
+        if not rows:
+            raise HTTPException(404, f"No schedules for {code} in range.")
+        by_day: dict[date, list] = {}
+        for r in rows:
+            by_day.setdefault(r.sim_date, []).append(r)
+        return [_schedule_series(by_day[d], code, d) for d in sorted(by_day)]
+
+
+@router.get("/{code}/schedule/accuracy", response_model=ScheduleAccuracyOut)
+def schedule_accuracy_endpoint(
+    code: str,
+    sim_date: date = Query(..., alias="date"),
+    ctx: AuthContext = Depends(require_read),
+):
+    """Schedule-vs-actual deviation metrics for a date (DSM-style, % of capacity)."""
+    with session_scope() as db:
+        metrics = schedule_accuracy(db, code, sim_date)
+        if metrics is None:
+            raise HTTPException(
+                404, f"Need both a schedule and a simulation for {code} on {sim_date}."
+            )
+        return ScheduleAccuracyOut(plant_code=code, sim_date=sim_date, **metrics)
 
 
 @router.get("/{code}/range", response_model=list[BlockSeriesOut])

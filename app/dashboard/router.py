@@ -364,6 +364,46 @@ def dashboard_revoke_key(prefix: str):
         return {"message": f"Revoked {n} key(s) with prefix '{prefix}'."}
 
 
+@router.get("/dashboard/api/schedule/{code}")
+def dashboard_schedule(code: str, date: str | None = None):
+    """Day-ahead P90 schedule + accuracy vs actual (read-only feed, no key)."""
+    from datetime import date as _date
+
+    from app.schedule import accuracy as schedule_accuracy
+    from app.schedule import get_schedule
+
+    with session_scope() as db:
+        try:
+            cfg = load_active_config(db, code)
+        except ValueError:
+            raise HTTPException(404, f"Unknown plant '{code}'") from None
+        d = _date.fromisoformat(date) if date else datetime.now(ZoneInfo(cfg.timezone)).date()
+        rows = get_schedule(db, code, d)
+        return {
+            "plant_code": code,
+            "date": d.isoformat(),
+            "issued_at": rows[0].issued_at.isoformat() if rows else None,
+            "anchor_mode": rows[0].anchor_mode if rows else None,
+            "block_count": len(rows),
+            "solar_p90_mwh_total": round(sum(r.solar_p90_mwh for r in rows), 1),
+            "wind_p90_mwh_total": round(sum(r.wind_p90_mwh for r in rows), 1),
+            "total_p90_mwh_total": round(sum(r.total_p90_mwh for r in rows), 1),
+            "accuracy": schedule_accuracy(db, code, d),
+            "blocks": [
+                {
+                    "block_no": r.block_no,
+                    "time": r.block_start.strftime("%H:%M"),
+                    "solar_p90_mw": round(r.solar_p90_mw, 2),
+                    "wind_p90_mw": round(r.wind_p90_mw, 2),
+                    "total_p90_mw": round(r.total_p90_mw, 2),
+                    "band_low": round(r.total_band_low_mw, 2),
+                    "band_high": round(r.total_band_high_mw, 2),
+                }
+                for r in rows
+            ],
+        }
+
+
 @router.get("/dashboard/api/history/{code}")
 def dashboard_history(code: str, days: int = 7):
     days = max(1, min(days, 31))

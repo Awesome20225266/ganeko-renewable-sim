@@ -44,6 +44,11 @@ SUMMARY_COLUMNS = [
     "solar_peak_mw", "wind_peak_mw", "solar_cuf", "wind_cuf",
     "hybrid_cuf", "solar_specific_yield",
 ]
+SCHEDULE_COLUMNS = [
+    "sim_date", "block_no", "block_start", "block_end",
+    "solar_p90_mw", "wind_p90_mw", "total_p90_mw",
+    "solar_p90_mwh", "wind_p90_mwh", "total_p90_mwh",
+]
 
 
 # --- helpers -----------------------------------------------------------------
@@ -216,7 +221,38 @@ def block_range(
     }
 
 
-# --- 5/6) daily summary (single date or range) ------------------------------
+# --- 5) day-ahead P90 schedule (dates <= today only) ------------------------
+@router.get("/schedule")
+def schedule(
+    date_str: str = Query(..., alias="date", description="YYYY-MM-DD (not in the future)"),
+    fmt: str = Query("json", alias="format", pattern="^(json|csv)$"),
+):
+    """Day-ahead P90 schedule for a completed/current date — solar, wind, total.
+
+    Restricted to dates <= today. The schedule for a FUTURE date is forward-looking
+    data, which this wrapper does not serve; use the key-protected /plants API for
+    that. Today and past dates are schedules that were already issued day-ahead,
+    so returning them keeps the LIVE_AND_HISTORICAL_ONLY policy intact.
+    """
+    plant = _plant()
+    d = _parse_date(date_str, "date")
+    if d > _today():
+        raise HTTPException(400, "Future dates are not allowed for schedule data.")
+    data = _guard(provider.fetch_schedule, plant, d.isoformat())
+    rows = [{**b, "sim_date": data.get("sim_date")} for b in (data.get("blocks") or [])]
+    if fmt == "csv":
+        return _csv(rows, SCHEDULE_COLUMNS, f"{plant}-schedule-{d.isoformat()}.csv")
+    return {
+        "plant_id": plant,
+        "date": d.isoformat(),
+        "data_policy": DATA_POLICY,
+        "schedule_version": data.get("schedule_version"),
+        "issued_at": data.get("issued_at"),
+        "blocks": rows,
+    }
+
+
+# --- 6/7) daily summary (single date or range) ------------------------------
 @router.get("/summary")
 def summary(
     date_str: str | None = Query(None, alias="date"),

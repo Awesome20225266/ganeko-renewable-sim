@@ -151,6 +151,45 @@ def fetch_range(plant_id: str, start_iso: str, end_iso: str) -> list:
         raise ProviderError(502, "Renewable data service error") from None
 
 
+def fetch_schedule(plant_id: str, date_iso: str) -> dict:
+    """Day-ahead P90 schedule for one date (in-process).
+
+    The router restricts this to dates <= today, so the wrapper never exposes a
+    forward-dated schedule and its LIVE_AND_HISTORICAL_ONLY policy still holds.
+    """
+    from app.schedule import get_schedule
+
+    try:
+        with session_scope() as db:
+            rows = get_schedule(db, plant_id, date_cls.fromisoformat(date_iso))
+            if not rows:
+                raise ProviderError(404, "No schedule issued for the requested date")
+            return {
+                "sim_date": date_iso,
+                "schedule_version": rows[0].schedule_version,
+                "issued_at": rows[0].issued_at.isoformat() if rows[0].issued_at else None,
+                "blocks": [
+                    {
+                        "block_no": r.block_no,
+                        "block_start": r.block_start.isoformat(),
+                        "block_end": r.block_end.isoformat(),
+                        "solar_p90_mw": round(r.solar_p90_mw, 4),
+                        "wind_p90_mw": round(r.wind_p90_mw, 4),
+                        "total_p90_mw": round(r.total_p90_mw, 4),
+                        "solar_p90_mwh": round(r.solar_p90_mwh, 5),
+                        "wind_p90_mwh": round(r.wind_p90_mwh, 5),
+                        "total_p90_mwh": round(r.total_p90_mwh, 5),
+                    }
+                    for r in rows
+                ],
+            }
+    except ProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — never leak internals to the user
+        logger.warning("wrapper fetch_schedule failed: %s", exc)
+        raise ProviderError(502, "Renewable data service error") from None
+
+
 def fetch_summary(plant_id: str, params: dict[str, str]) -> dict:
     """Daily summary for a single date or a range (in-process)."""
     try:

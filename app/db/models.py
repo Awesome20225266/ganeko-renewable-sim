@@ -291,6 +291,57 @@ class DailySummary(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Day-ahead P90 schedule (issued once per date, then frozen)
+# --------------------------------------------------------------------------- #
+class ScheduleBlock(Base):
+    """A published day-ahead schedule block.
+
+    Kept in its own table rather than as columns on `generation_block` so that no
+    existing query, index or API response shape changes. A schedule is a
+    different object from a simulation output: it is issued once, day-ahead, and
+    is then FROZEN — today's LIVE re-simulation must not move it, or the
+    deviation being measured against it is a moving target.
+    """
+
+    __tablename__ = "schedule_block"
+    __table_args__ = (
+        UniqueConstraint(
+            "plant_code", "sim_date", "block_no", "schedule_version",
+            name="uq_schedule_block",
+        ),
+        Index("ix_schedule_plant_date_cur", "plant_code", "sim_date", "is_current"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plant_code: Mapped[str] = mapped_column(String(64), index=True)
+    sim_date: Mapped[date] = mapped_column(Date)
+    block_no: Mapped[int] = mapped_column(Integer)
+    block_start: Mapped[datetime] = mapped_column(DateTime)
+    block_end: Mapped[datetime] = mapped_column(DateTime)
+
+    solar_p90_mw: Mapped[float] = mapped_column(Float, default=0.0)
+    wind_p90_mw: Mapped[float] = mapped_column(Float, default=0.0)
+    total_p90_mw: Mapped[float] = mapped_column(Float, default=0.0)
+    solar_p90_mwh: Mapped[float] = mapped_column(Float, default=0.0)
+    wind_p90_mwh: Mapped[float] = mapped_column(Float, default=0.0)
+    total_p90_mwh: Mapped[float] = mapped_column(Float, default=0.0)
+
+    solar_band_low_mw: Mapped[float] = mapped_column(Float, default=0.0)
+    solar_band_high_mw: Mapped[float] = mapped_column(Float, default=0.0)
+    wind_band_low_mw: Mapped[float] = mapped_column(Float, default=0.0)
+    wind_band_high_mw: Mapped[float] = mapped_column(Float, default=0.0)
+    total_band_low_mw: Mapped[float] = mapped_column(Float, default=0.0)
+    total_band_high_mw: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Lineage: which simulation the schedule was anchored on, and when issued.
+    anchor_mode: Mapped[str] = mapped_column(String(32))  # HISTORICAL/LIVE/FORECAST
+    schedule_version: Mapped[str] = mapped_column(String(32))
+    plant_config_version: Mapped[int] = mapped_column(Integer)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+# --------------------------------------------------------------------------- #
 # API keys, usage logs
 # --------------------------------------------------------------------------- #
 class ApiKey(Base):

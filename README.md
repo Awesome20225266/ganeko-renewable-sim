@@ -107,6 +107,50 @@ logged to `api_usage_log`. Keys are stored **hashed (SHA-256)** — never in pla
 
 ---
 
+## 2b. Day-ahead P90 schedule
+
+A 96-block day-ahead schedule anchored on the simulated generation, carrying a
+realistic (deliberately **non-uniform**) forecast error: tight through a clear
+midday, wide on the sunrise/sunset ramps, widest during cloud/wind episodes.
+P90 is reported for **solar, wind and the hybrid total**.
+
+```bash
+# Schedule for a date — 96 blocks of solar/wind/total P90 (MW + MWh)
+curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/schedule?date=2026-06-25"
+
+# Schedules over a range (max 31 days)
+curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/schedule/range?start=2026-06-20&end=2026-06-25"
+
+# Schedule vs actual — DSM-style deviation metrics
+curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/schedule/accuracy?date=2026-06-25"
+```
+
+These use the **same API keys** as every other `/plants` endpoint — nothing to
+re-issue. The restricted wrapper exposes `GET /api/renewable/schedule?date=…`
+for dates **≤ today** only, so its no-forecast policy still holds.
+
+Issue schedules manually (the daily job issues today..+7 automatically):
+```bash
+python -m app.cli schedule --date 2026-06-25
+python -m app.cli schedule --start 2026-06-01 --end 2026-06-25
+```
+A schedule is **frozen once issued** — today's live re-simulation cannot move a
+published schedule, or the deviation measured against it would be a moving
+target. Use `--force` to deliberately re-issue.
+
+Accuracy is tuned via `SCHEDULE_SIGMA_SCALE` (default `1.15` → ~10% MAPE,
+~2% nMAE of capacity). Metrics are reported as **nMAE and ±10%/±15% band
+occupancy normalised to capacity**, which is how Indian DSM deviation is
+assessed; MAPE is arithmetically large and operationally meaningless at 06:00
+when a solar plant is producing 1 MW.
+
+> The schedule is derived from the simulated actual, so it is far more accurate
+> than any genuine day-ahead forecast (real day-ahead nMAE is 8–15% of capacity).
+> That is correct for exercising downstream systems, but the accuracy figures
+> are not a claim about forecasting performance.
+
+---
+
 ## 3. Simulation modes & the engines
 
 | Mode | Endpoint chosen | Label |

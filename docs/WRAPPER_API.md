@@ -41,6 +41,7 @@ All requests send the **wrapper user key** (not the provider key):
 | `GET /api/renewable/range?start=YYYY-MM-DD&end=YYYY-MM-DD` | Block range (≤ 31 days) |
 | `GET /api/renewable/summary?date=YYYY-MM-DD` | Daily totals (single date) |
 | `GET /api/renewable/summary?start=…&end=…` | Daily totals (range) |
+| `GET /api/renewable/schedule?date=YYYY-MM-DD` | Day-ahead **P90 schedule** — solar, wind and total, 96 blocks |
 
 Add `&format=csv` to `current`, `today-completed-blocks`, `historical`, and `range`
 for flat, Excel-friendly CSV.
@@ -59,6 +60,9 @@ curl -H "X-API-Key: <USER_WRAPPER_KEY>" "http://localhost:8000/api/renewable/his
 
 # Block range
 curl -H "X-API-Key: <USER_WRAPPER_KEY>" "http://localhost:8000/api/renewable/range?start=2026-06-21&end=2026-06-26"
+
+# Day-ahead P90 schedule (solar + wind + total) — date must not be in the future
+curl -H "X-API-Key: <USER_WRAPPER_KEY>" "http://localhost:8000/api/renewable/schedule?date=2026-06-25"
 
 # CSV for Excel
 curl -H "X-API-Key: <USER_WRAPPER_KEY>" "http://localhost:8000/api/renewable/today-completed-blocks?format=csv"
