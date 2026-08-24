@@ -69,6 +69,15 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("run-daily", help="Run the daily scheduler job once")
     sub.add_parser("live-refresh", help="Run the live-refresh job once")
+    sub.add_parser(
+        "forecast-prefetch",
+        help="Refresh the FORECAST horizon once (skips dates already fresh). Run this "
+             "early in the UTC day, while the provider quota is still available.",
+    )
+    sub.add_parser(
+        "schedule-retry",
+        help="Issue any day-ahead schedule that is currently missing (idempotent)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -237,6 +246,18 @@ def main(argv: list[str] | None = None) -> int:
         from app.scheduler.service import run_live_refresh
 
         run_live_refresh()
+        return 0
+
+    if args.cmd == "forecast-prefetch":
+        from app.scheduler.service import run_forecast_prefetch
+
+        run_forecast_prefetch()
+        return 0
+
+    if args.cmd == "schedule-retry":
+        from app.scheduler.service import run_schedule_retry
+
+        run_schedule_retry()
         return 0
 
     return 1

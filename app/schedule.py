@@ -12,6 +12,7 @@ Anchor selection, best-available first:
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
@@ -93,15 +94,71 @@ def _to_normalized(rows) -> list[NormalizedBlock]:
     ]
 
 
-def _pick_anchor(db: Session, plant_code: str, sim_date: date, tz: str):
-    """Return (generation_rows, weather_rows, mode) for the best available anchor."""
+@dataclass
+class _Anchor:
+    """The simulation a schedule is built from, plus how old its weather is."""
+
+    gen_rows: list[GenerationBlock]
+    wx_rows: list
+    mode: str
+    age_hours: float | None
+
+
+def anchor_age_hours(rows: list[GenerationBlock]) -> float | None:
+    """Age of the newest weather behind these blocks, in hours (None if unknown).
+
+    Reads weather_fetch_time rather than processed_at: a rate-limited run re-simulates
+    from stored weather and stamps a *new* processed_at while the underlying observation
+    stays old, so processed_at would report every stale anchor as fresh.
+    """
+    times = [r.weather_fetch_time for r in rows if r.weather_fetch_time is not None]
+    if not times:
+        return None
+    newest = max(times)
+    if newest.tzinfo is None:
+        newest = newest.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - newest).total_seconds() / 3600.0
+
+
+def _pick_anchor(
+    db: Session,
+    plant_code: str,
+    sim_date: date,
+    tz: str,
+    max_age_hours: float | None = None,
+) -> tuple[_Anchor | None, list[str]]:
+    """Best usable anchor for this date, plus a list of candidates rejected as stale.
+
+    Candidates are tried in preference order and any whose weather is older than
+    `max_age_hours` is SKIPPED rather than accepted, so a fresher lower-preference
+    anchor can win. Publishing off a stale anchor is the failure mode that hid a
+    seven-night provider outage: the forecast step kept "succeeding" from week-old
+    stored weather, so every schedule looked healthy while being anchored on a forecast
+    that no longer described the day. If nothing fresh exists the caller raises instead.
+
+    `sim_date >= today` uses the FUTURE order so that today's own day-ahead FORECAST
+    anchor still wins over a LIVE run made the same morning. With `>` a recovery attempt
+    at 00:30 local time would silently anchor a "day-ahead" commitment on that day's
+    LIVE simulation and record anchor_mode=LIVE.
+    """
     today = datetime.now(ZoneInfo(tz)).date()
-    order = _ANCHOR_ORDER_FUTURE if sim_date > today else _ANCHOR_ORDER_PAST
+    order = _ANCHOR_ORDER_FUTURE if sim_date >= today else _ANCHOR_ORDER_PAST
+    stale: list[str] = []
     for mode in order:
         rows = get_blocks(db, plant_code, sim_date, mode)
-        if rows:
-            return rows, get_weather_blocks(db, plant_code, sim_date, mode), mode
-    return None, None, None
+        if not rows:
+            continue
+        age = anchor_age_hours(rows)
+        if max_age_hours is not None and age is not None and age > max_age_hours:
+            stale.append(f"{mode} ({age:.0f}h old)")
+            continue
+        return _Anchor(
+            gen_rows=rows,
+            wx_rows=get_weather_blocks(db, plant_code, sim_date, mode),
+            mode=mode,
+            age_hours=age,
+        ), stale
+    return None, stale
 
 
 def has_schedule(db: Session, plant_code: str, sim_date: date) -> bool:
@@ -166,17 +223,28 @@ def ensure_schedule(
             return {"issued": False, "reason": "frozen", "plant_code": plant_code,
                     "sim_date": sim_date.isoformat()}
 
-        gen_rows, wx_rows, mode = _pick_anchor(db, plant_code, sim_date, tz)
-        if not gen_rows:
+        anchor, stale = _pick_anchor(
+            db, plant_code, sim_date, tz, settings.SCHEDULE_MAX_ANCHOR_AGE_HOURS
+        )
+        if anchor is None:
+            if stale:
+                raise ScheduleError(
+                    f"Only stale anchors available for {plant_code} {sim_date}: "
+                    f"{', '.join(stale)} — max allowed is "
+                    f"{settings.SCHEDULE_MAX_ANCHOR_AGE_HOURS}h. The weather provider is "
+                    "most likely rate-limited; refusing to publish a day-ahead schedule "
+                    "anchored on stale weather."
+                )
             raise ScheduleError(
                 f"No simulation to anchor a schedule on for {plant_code} {sim_date}. "
                 "Run a simulation for that date first."
             )
+        mode = anchor.mode
 
         blocks = build_schedule(
             spec,
-            _to_block_results(gen_rows),
-            _to_normalized(wx_rows or []),
+            _to_block_results(anchor.gen_rows),
+            _to_normalized(anchor.wx_rows or []),
             sim_date,
             params_from(settings),
         )
@@ -221,13 +289,17 @@ def ensure_schedule(
             ))
 
         total_mwh = sum(b.total_p90_mwh for b in blocks)
+        age = anchor.age_hours
         logger.info(
-            "Schedule issued plant=%s date=%s anchor=%s blocks=%d total=%.1fMWh",
-            plant_code, sim_date, mode, len(blocks), total_mwh,
+            "Schedule issued plant=%s date=%s anchor=%s anchor_age=%s blocks=%d total=%.1fMWh",
+            plant_code, sim_date, mode,
+            f"{age:.1f}h" if age is not None else "unknown",
+            len(blocks), total_mwh,
         )
         return {
             "issued": True, "plant_code": plant_code,
             "sim_date": sim_date.isoformat(), "anchor_mode": mode,
+            "anchor_age_hours": round(age, 2) if age is not None else None,
             "blocks": len(blocks),
             "solar_mwh": round(sum(b.solar_p90_mwh for b in blocks), 3),
             "wind_mwh": round(sum(b.wind_p90_mwh for b in blocks), 3),

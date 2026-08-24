@@ -39,6 +39,22 @@ class Settings(BaseSettings):
     SCHEDULER_DAILY_TIME: str = "00:30"
     LIVE_REFRESH_MINUTES: int = 15
 
+    # Forecast-horizon prefetch. The daily job is pinned to SCHEDULER_DAILY_TIME in
+    # plant-local time (00:30 IST = 19:00 UTC) because that is a publication deadline.
+    # But Open-Meteo's free quota — shared across the host's egress IP — is reliably
+    # spent from ~07:00 UTC until it resets at 00:00 UTC, so a forecast fetch at
+    # 19:00 UTC returns 429 every night. Fetching the horizon in its own job just after
+    # the reset is the only slot where it can actually be refreshed.
+    # Pinned to UTC on purpose: the quota resets in UTC, not in plant-local time.
+    FORECAST_PREFETCH_ENABLED: bool = True
+    # Runs hourly across this inclusive UTC hour range and is a cheap no-op once the
+    # horizon is fresh, so a morning that is still rate-limited just retries next hour.
+    FORECAST_PREFETCH_START_HOUR_UTC: int = 1
+    FORECAST_PREFETCH_END_HOUR_UTC: int = 6
+    # A stored forecast younger than this counts as fresh and is not refetched. Must stay
+    # under 24h or a date would never be refreshed on subsequent days.
+    FORECAST_PREFETCH_MAX_AGE_HOURS: int = 20
+
     # Keep-alive: self-ping the public URL so a free-tier host (Render/Railway/Fly)
     # never spins down on idle. Render auto-injects RENDER_EXTERNAL_URL; if KEEPALIVE_URL
     # is blank we fall back to that. Ping interval must be < the host's idle threshold
@@ -84,6 +100,16 @@ class Settings(BaseSettings):
     # forecast. At N=1 each date is issued at 00:30 the day before, off the
     # freshest forecast — which is what the accuracy model is calibrated for.
     SCHEDULE_HORIZON_DAYS: int = 1
+    # Refuse to publish a "day-ahead" schedule anchored on weather older than this.
+    # Without the guard, a rate-limited forecast step silently re-simulates from whatever
+    # weather is already stored, so schedules keep publishing off a days-old forecast and
+    # every health signal looks green. That is exactly how a 7-night provider outage went
+    # unnoticed until the stored horizon ran out. 36h covers a normal prefetch-then-
+    # publish cycle (~18h) with headroom; beyond that we fail loudly instead.
+    SCHEDULE_MAX_ANCHOR_AGE_HOURS: int = 36
+    # Hourly self-heal: re-attempt any schedule the daily job could not issue. Idempotent
+    # (a published schedule stays frozen), so this is a no-op in the normal case.
+    SCHEDULE_RETRY_ENABLED: bool = True
     # Master accuracy knob. 1.15 -> ~10% MAPE / ~2% nMAE of capacity ("P90" =
     # ~90% accurate). Raise for a looser schedule, lower for a tighter one.
     SCHEDULE_SIGMA_SCALE: float = 1.15

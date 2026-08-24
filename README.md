@@ -213,18 +213,39 @@ Config is **versioned**: change assumptions by inserting a new `config_version` 
 ## 5. Scheduler & manual runs
 
 - **Daily job** (`SCHEDULER_DAILY_TIME`, plant-local): finalizes yesterday (HISTORICAL),
-  refreshes today (LIVE), and builds the +1..+7-day forecast for every active plant.
+  refreshes today (LIVE), and publishes the day-ahead P90 schedule. This is a publication
+  deadline, so it does **not** fetch the forecast horizon — see below.
+- **Forecast prefetch** (`FORECAST_PREFETCH_START_HOUR_UTC`..`END`, hourly, **UTC**):
+  builds the +1..+7-day forecast for every active plant. Deliberately pinned to UTC and
+  separated from the daily job: Open-Meteo's free quota is shared across the host's egress
+  IP and is reliably exhausted from ~07:00 UTC until it resets at 00:00 UTC. A daily job at
+  00:30 IST runs at 19:00 UTC — deep inside that dead window — so its horizon fetches
+  returned HTTP 429 every night, silently fell back to stale stored weather, and reported
+  OK. Fetching just after the UTC reset is the only slot that can actually refresh it. The
+  job skips dates already fresher than `FORECAST_PREFETCH_MAX_AGE_HOURS`, so the extra
+  hours in the window are free retries. Set `FORECAST_PREFETCH_ENABLED=false` to fold the
+  horizon back into the daily job.
+- **Schedule retry** (hourly): re-issues any day-ahead schedule the daily job could not
+  publish. Idempotent — a published schedule stays frozen. Without it, one rate-limited
+  night meant the date never got a schedule at all.
 - **Live refresh** every `LIVE_REFRESH_MINUTES` re-runs today's LIVE simulation.
+- **Stale-anchor guard:** `ensure_schedule` refuses to publish a schedule anchored on
+  weather older than `SCHEDULE_MAX_ANCHOR_AGE_HOURS` (default 36h) and fails loudly
+  instead. A stale anchor is how a seven-night provider outage stayed invisible: the
+  schedule kept publishing off a week-old forecast while every health signal looked green.
 - Run jobs manually:
   ```bash
   python -m app.cli run-daily
   python -m app.cli live-refresh
+  python -m app.cli forecast-prefetch                              # refill the horizon
+  python -m app.cli schedule-retry                                 # issue any missing schedule
   python -m app.cli simulate --date 2024-06-21 --mode HISTORICAL   # any past date
   python -m app.cli reprocess --dates 2026-06-20 2026-06-21
   ```
 - **Cron / Celery-beat alternative:** disable the in-process scheduler
   (`SCHEDULER_ENABLED=false`) and schedule `python -m app.cli run-daily` from cron, or wire
-  `run_daily_job` into a Celery-beat schedule.
+  `run_daily_job` into a Celery-beat schedule. Schedule `forecast-prefetch` separately,
+  early in the **UTC** day, for the reason above.
 
 ---
 

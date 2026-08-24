@@ -42,6 +42,20 @@ services:
         value: Asia/Kolkata
       - key: LIVE_REFRESH_MINUTES
         value: "15"
+      # The day-ahead schedule publishes at SCHEDULER_DAILY_TIME (00:30 IST = 19:00 UTC),
+      # a hard deadline. Open-Meteo's free quota is shared across Render's egress IP and
+      # is reliably exhausted from ~07:00 UTC until it resets at 00:00 UTC, so the
+      # forecast horizon is fetched in its own job just after the reset instead.
+      - key: FORECAST_PREFETCH_ENABLED
+        value: "true"
+      - key: FORECAST_PREFETCH_START_HOUR_UTC   # 01:00 UTC = 06:30 IST
+        value: "1"
+      - key: FORECAST_PREFETCH_END_HOUR_UTC     # hourly retries through 06:00 UTC
+        value: "6"
+      - key: SCHEDULE_MAX_ANCHOR_AGE_HOURS      # refuse a stale day-ahead anchor
+        value: "36"
+      - key: SCHEDULE_RETRY_ENABLED             # hourly self-heal for a missed schedule
+        value: "true"
       - key: KEEPALIVE_ENABLED      # self-ping /health to prevent free-tier idle spin-down
         value: "true"
       # KEEPALIVE_URL left unset → falls back to Render's auto-injected RENDER_EXTERNAL_URL

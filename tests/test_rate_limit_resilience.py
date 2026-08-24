@@ -319,7 +319,11 @@ def test_successful_refresh_clears_backoff(client, stored_yesterday_response, mo
 
 # --- 5) one failing step must not cancel the rest of the daily job -----------
 def test_daily_job_continues_after_a_failing_step(monkeypatch):
-    """A rate-limited LIVE step used to silently cancel the whole forecast horizon."""
+    """A rate-limited LIVE step used to silently cancel the whole forecast horizon.
+
+    Run with FORECAST_PREFETCH_ENABLED=false — the path where the daily job still owns
+    the horizon — so the original guarantee stays covered after the job split.
+    """
     from app.scheduler import service as sched
 
     ran: list[tuple[date, str]] = []
@@ -330,8 +334,12 @@ def test_daily_job_continues_after_a_failing_step(monkeypatch):
         ran.append((sim_date, mode.value))
         return None
 
+    patched = sched.get_settings().model_copy(
+        update={"FORECAST_PREFETCH_ENABLED": False}
+    )
     monkeypatch.setattr(sched, "_active_plants", lambda: [(PLANT, "Asia/Kolkata")])
     monkeypatch.setattr(sched, "run_simulation_sync", fake_run)
+    monkeypatch.setattr(sched, "get_settings", lambda: patched)
     sched.run_daily_job()
 
     modes = [m for _d, m in ran]
@@ -339,6 +347,93 @@ def test_daily_job_continues_after_a_failing_step(monkeypatch):
     assert modes.count("FORECAST") == sched.FORECAST_HORIZON_DAYS, (
         "the forecast horizon must still be built when the LIVE step fails"
     )
+
+
+# --- 6) the horizon fetch must not sit on the publication deadline -----------
+def test_daily_job_does_not_fetch_the_horizon_when_prefetch_is_enabled(monkeypatch):
+    """SCHEDULER_DAILY_TIME 00:30 IST is 19:00 UTC — 19h into the provider's quota day.
+
+    The free quota (shared host egress IP) is reliably spent from ~07:00 UTC until the
+    00:00 UTC reset, so every horizon fetch at 19:00 UTC returned 429, fell back to stale
+    stored weather and reported OK. The horizon belongs in run_forecast_prefetch instead.
+    """
+    from app.scheduler import service as sched
+
+    ran: list[str] = []
+
+    def fake_run(plant, sim_date, mode, triggered_by="manual", force_refetch=False, **kw):
+        ran.append(mode.value)
+        return None
+
+    patched = sched.get_settings().model_copy(
+        update={"FORECAST_PREFETCH_ENABLED": True}
+    )
+    monkeypatch.setattr(sched, "_active_plants", lambda: [(PLANT, "Asia/Kolkata")])
+    monkeypatch.setattr(sched, "run_simulation_sync", fake_run)
+    monkeypatch.setattr(sched, "get_settings", lambda: patched)
+    sched.run_daily_job()
+
+    assert ran.count("FORECAST") == 0, "the horizon must not be fetched at the deadline"
+    assert ran.count("HISTORICAL") == 1 and ran.count("LIVE") == 1
+
+
+def test_forecast_prefetch_covers_the_horizon_and_isolates_failures(monkeypatch):
+    from app.scheduler import service as sched
+
+    class _Fresh:
+        weather_from_cache = False
+
+    ran: list[date] = []
+
+    def fake_run(plant, sim_date, mode, triggered_by="manual", force_refetch=False, **kw):
+        ran.append(sim_date)
+        if len(ran) == 2:
+            raise WeatherFetchError("Weather provider rate limit reached (HTTP 429)", 429)
+        return _Fresh()
+
+    monkeypatch.setattr(sched, "_active_plants", lambda: [(PLANT, "Asia/Kolkata")])
+    monkeypatch.setattr(sched, "_forecast_is_fresh", lambda *a, **kw: False)
+    monkeypatch.setattr(sched, "run_simulation_sync", fake_run)
+    sched.run_forecast_prefetch()
+
+    assert len(ran) == sched.FORECAST_HORIZON_DAYS, (
+        "one failing date must not stop the rest of the horizon"
+    )
+
+
+def test_forecast_prefetch_skips_dates_already_fresh(monkeypatch):
+    """Idempotence is what makes the hourly retry window essentially free."""
+    from app.scheduler import service as sched
+
+    def must_not_run(*_a, **_kw):  # pragma: no cover - must not be reached
+        raise AssertionError("a fresh forecast date must not be refetched")
+
+    monkeypatch.setattr(sched, "_active_plants", lambda: [(PLANT, "Asia/Kolkata")])
+    monkeypatch.setattr(sched, "_forecast_is_fresh", lambda *a, **kw: True)
+    monkeypatch.setattr(sched, "run_simulation_sync", must_not_run)
+    sched.run_forecast_prefetch()
+
+
+def test_prefetch_does_not_count_a_stale_fallback_as_refreshed(monkeypatch, caplog):
+    """A 429 does not raise — run_simulation returns OK off stored weather.
+
+    If the job counted that as a refresh it would report success while the horizon stayed
+    stale, which is precisely how the original seven-night outage stayed invisible.
+    """
+    from app.scheduler import service as sched
+
+    class _Stale:
+        weather_from_cache = True
+
+    monkeypatch.setattr(sched, "_active_plants", lambda: [(PLANT, "Asia/Kolkata")])
+    monkeypatch.setattr(sched, "_forecast_is_fresh", lambda *a, **kw: False)
+    monkeypatch.setattr(sched, "run_simulation_sync", lambda *a, **kw: _Stale())
+
+    with caplog.at_level("WARNING", logger="app.scheduler.service"):
+        sched.run_forecast_prefetch()
+
+    assert "rate-limited" in caplog.text
+    assert "0 refreshed" in caplog.text
 
 
 def test_live_refresh_job_shares_the_backoff(monkeypatch):
