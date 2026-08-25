@@ -54,8 +54,27 @@ services:
         value: "6"
       - key: SCHEDULE_MAX_ANCHOR_AGE_HOURS      # refuse a stale day-ahead anchor
         value: "36"
-      - key: SCHEDULE_RETRY_ENABLED             # hourly self-heal for a missed schedule
+      - key: SCHEDULE_RETRY_ENABLED             # hourly: issue missing + revise future
         value: "true"
+      # Publication invariants. Pinned here rather than left to the code defaults so the
+      # deployed values are visible and auditable in the blueprint.
+      #
+      # The instant the immutability rules switch on: from here a published ACTUAL is
+      # never recalculated (an admin reprocess stores a separate diagnostic instead of
+      # replacing it), and a SCHEDULE is only revised beyond its operational lock window.
+      # QUOTED deliberately: an unquoted ISO-8601 timestamp is parsed by YAML as a
+      # timestamp type, not a string.
+      - key: GENERATION_IMMUTABILITY_CUTOVER
+        value: "2026-08-25T15:00:00+05:30"     # 15:00 IST = 09:30 UTC
+      # Automatic intraday schedule revision by the hourly pass. Costs zero provider
+      # calls — it reads stored generation/weather and recomputes P90 in process.
+      - key: SCHEDULE_INTRADAY_REVISION_ENABLED
+        value: "true"
+      # Operational lock-in: while operating inside block X, the schedule for this many
+      # minutes ahead is committed dispatch. 120 min on the 15-min grid protects X plus
+      # the next 8 blocks, so the first revisable block is X+9.
+      - key: SCHEDULE_REVISION_LOCK_MINUTES
+        value: "120"
       - key: KEEPALIVE_ENABLED      # self-ping /health to prevent free-tier idle spin-down
         value: "true"
       # KEEPALIVE_URL left unset → falls back to Render's auto-injected RENDER_EXTERNAL_URL

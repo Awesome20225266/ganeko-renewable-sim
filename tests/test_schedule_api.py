@@ -222,18 +222,38 @@ def test_wrapper_csv_export(client):
 
 # --- backward compatibility -------------------------------------------------
 def test_existing_endpoints_unchanged(client):
-    """The pre-existing response shapes must not gain or lose a single field."""
-    hist = client.get(f"/plants/HYBRID01/historical?date={PAST}", headers=ADMIN).json()
-    assert set(hist["blocks"][0]) == {
+    """Pre-existing fields must all survive; growth is allowed, loss is not.
+
+    Relaxed from an exact-equality guard when `is_final` was added for the Actual
+    immutability contract. Removing or renaming a field silently breaks a consumer;
+    appending one cannot, since JSON clients ignore keys they do not read. The
+    additive keys are asserted separately below so an accidental extra field still
+    fails the build.
+    """
+    legacy_block_fields = {
         "block_no", "block_start", "block_end", "solar_mw", "solar_mwh",
         "wind_mw", "wind_mwh", "total_mw", "total_mwh", "solar_cuf", "wind_cuf",
         "hybrid_cuf", "solar_status", "wind_status", "data_mode", "data_label",
         "data_quality_status",
     }
-    wrapped = client.get(f"/api/renewable/historical?date={PAST}",
-                         headers=wrapper_headers()).json()
-    assert set(wrapped) == {"plant_id", "date", "data_policy", "blocks"}
-    assert set(wrapped["blocks"][0]) == {
+    hist = client.get(f"/plants/HYBRID01/historical?date={PAST}", headers=ADMIN).json()
+    assert set(hist["blocks"][0]) == legacy_block_fields | {"is_final"}
+
+    legacy_wrapped_block_fields = {
         "sim_date", "block_no", "block_start", "block_end", "solar_mw", "wind_mw",
         "total_mw", "solar_mwh", "wind_mwh", "total_mwh", "data_label",
     }
+    wrapped = client.get(f"/api/renewable/historical?date={PAST}",
+                         headers=wrapper_headers()).json()
+    assert set(wrapped) == {"plant_id", "date", "data_policy", "blocks"}
+    assert set(wrapped["blocks"][0]) == legacy_wrapped_block_fields | {"is_final"}
+
+
+def test_today_completed_blocks_gained_only_additive_fields(client):
+    """/today-completed-blocks keeps its old keys and gains as_of + is_final."""
+    r = client.get("/api/renewable/today-completed-blocks", headers=wrapper_headers())
+    assert r.status_code in (200, 404)  # 404 when no LIVE run exists in this test DB
+    if r.status_code == 200:
+        assert set(r.json()) == {
+            "plant_id", "current_block_no", "data_policy", "blocks", "as_of",
+        }

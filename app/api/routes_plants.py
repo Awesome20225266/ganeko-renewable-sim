@@ -31,6 +31,7 @@ from app.api.schemas import (
 from app.config.settings import get_settings
 from app.db.base import session_scope
 from app.db.models import DailySummary, GenerationBlock, PlantConfig, SimulationVersion
+from app.immutability import is_final_actual
 from app.schedule import accuracy as schedule_accuracy
 from app.schedule import get_schedule, get_schedule_range
 from app.services import create_config_version
@@ -39,7 +40,14 @@ from app.simulate import ensure_fresh_live, load_active_config
 router = APIRouter(prefix="/plants", tags=["plants"])
 
 
-def _block_to_out(b: GenerationBlock) -> BlockOut:
+def _block_to_out(b: GenerationBlock, tz: str | None = None) -> BlockOut:
+    """Map a stored block to the API shape.
+
+    `tz` is the plant timezone, needed only to decide `is_final` (block_start is
+    naive local). It defaults to the configured plant timezone so the three
+    existing call sites and any external caller keep working unchanged.
+    """
+    tz = tz or get_settings().PLANT_TZ
     return BlockOut(
         block_no=b.block_no,
         block_start=b.block_start,
@@ -58,6 +66,7 @@ def _block_to_out(b: GenerationBlock) -> BlockOut:
         data_mode=b.data_mode,
         data_label=b.data_label,
         data_quality_status=b.data_quality_status,
+        is_final=is_final_actual(b.data_label),
     )
 
 
@@ -223,7 +232,8 @@ def _series(code: str, sim_date: date, data_mode: str, current_block: int | None
                 f"No {data_mode} simulation for {code} on {sim_date}. "
                 f"Trigger a run via POST /admin/reprocess.",
             )
-        out_blocks = [_block_to_out(b) for b in blocks]
+        tz = load_active_config(db, code).timezone
+        out_blocks = [_block_to_out(b, tz) for b in blocks]
         cur = None
         if current_block and 0 < current_block <= len(out_blocks):
             cur = out_blocks[current_block - 1]
@@ -500,6 +510,7 @@ def block_range(
         blocks = get_blocks_range(db, code, start, end)
         if not blocks:
             raise HTTPException(404, f"No simulation data for {code} in range.")
+        tz = load_active_config(db, code).timezone
         by_day: dict[date, list[GenerationBlock]] = {}
         for b in blocks:
             by_day.setdefault(b.sim_date, []).append(b)
@@ -515,7 +526,7 @@ def block_range(
                     simulation_version=day_blocks[0].simulation_version,
                     weather_source=day_blocks[0].weather_source,
                     block_count=len(day_blocks),
-                    blocks=[_block_to_out(b) for b in day_blocks],
+                    blocks=[_block_to_out(b, tz) for b in day_blocks],
                 )
             )
         return out

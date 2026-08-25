@@ -107,6 +107,10 @@ class BlockOut(BaseModel):
     data_mode: str
     data_label: str
     data_quality_status: str
+    # True when this block is a published Actual that can never change again.
+    # False means either "still a forecast" or "an Actual from before the
+    # immutability cutover". Derived from data_label + block_start, not stored.
+    is_final: bool = False
 
 
 class BlockSeriesOut(BaseModel):

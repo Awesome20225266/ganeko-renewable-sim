@@ -51,6 +51,38 @@ All `/plants` and `/admin` endpoints require the header `X-API-Key: <key>` (head
 configurable via `API_KEY_HEADER`). Every response carries a **data label**:
 `HISTORICAL_SIMULATED | LIVE_ESTIMATED | FORECAST_SIMULATED | REPROCESSED | PARTIAL | FAILED | FINALIZED`.
 
+### Actual vs Schedule: what may move
+
+Two different objects with two different guarantees. `GENERATION_IMMUTABILITY_CUTOVER`
+(default 2026-08-25 15:00 IST) is the instant enforcement *switches on*; from then it is
+unconditional. Nothing stored is rewritten by that transition — the system simply stops
+rewriting. A **Historical** Actual or Schedule is final regardless of the cutover.
+
+| | May a later refresh change it? |
+|---|---|
+| **Actual** — `LIVE_ESTIMATED` (today's reached blocks), `HISTORICAL_SIMULATED` (a completed day) | **No.** Write once, publish once, never revise. |
+| **Forecast** — `FORECAST_SIMULATED` (today's not-yet-reached blocks, `/forecast`) | Yes — that is the point of a forecast. |
+| **Schedule** — `/plants/{code}/schedule` | Only blocks beyond the 2-hour operational lock (X+9 onward at the default `SCHEDULE_REVISION_LOCK_MINUTES=120`), automatically, hourly. |
+
+This matters because Open-Meteo revises its own view of the past: measured on
+2026-08-25, already-elapsed intervals came back **+19% to +56%** brighter on a
+later model run, which used to restate completed blocks mid-day. It no longer
+does. Blocks carry `is_final: true` once they are a settled Actual.
+
+**One Actual per interval, for its whole lifecycle.** A block published by `/live`
+keeps that exact value when the day later becomes historical — the daily
+`HISTORICAL` run republishes it rather than recomputing it from the archive. So
+`/live` and `/historical` never disagree about the same 15 minutes. (Before this
+was enforced, real production data for 2026-08-24 showed 55 of 96 blocks differing
+between the two, up to −24 MW on one block and −3.13% on day energy.) A date with
+no live coverage — a backfill — still builds from the historical-forecast archive
+as before.
+
+**Admin reprocess is a diagnostic, not a restatement.** `POST /admin/reprocess`
+recomputes a date and stores the result under its own `simulation_version` with
+`is_current=false`, so it is inspectable but never served. A published Actual has
+no override path at all — that is the point of calling it published.
+
 ```bash
 KEY=admin-dev-key-change-me
 B=http://localhost:8000
@@ -80,7 +112,7 @@ curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/summary?start=2026-06-18&end=2026-
 # 6) Block-wise over a date range (grouped per day, max 31 days)
 curl -H "X-API-Key: $KEY" "$B/plants/HYBRID01/range?start=2026-06-20&end=2026-06-25"
 
-# 7) Reprocess (ADMIN) — new versioned outputs, prior versions preserved
+# 7) Reprocess (ADMIN) — DIAGNOSTIC recompute; stored separately, never served
 curl -X POST -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
      -d '{"plant_code":"HYBRID01","dates":["2026-06-20"],"mode":"HISTORICAL"}' \
      $B/admin/reprocess
@@ -148,6 +180,27 @@ python -m app.cli schedule --start 2026-06-01 --end 2026-06-25
 A schedule is **frozen once issued** — today's live re-simulation cannot move a
 published schedule, or the deviation measured against it would be a moving
 target. Use `--force` to deliberately re-issue.
+
+Every re-issue is **forward-only**, and stops short of committed dispatch. While you
+are operating inside block X, the next `SCHEDULE_REVISION_LOCK_MINUTES` (default 120)
+are already committed, so the protected window is **X plus the following 8 blocks** —
+the first block a revision may move is **X+9**. Operating in 15:45–16:00: everything
+through 17:45–18:00 holds, and 18:00–18:15 is the first block that can absorb a new
+forecast. The response reports `blocks_revised` / `blocks_protected` so you can see how
+much of the day the call was allowed to touch.
+
+A schedule for a date already past is historical and fully protected — all 96 blocks.
+Near midnight the window clamps to the end of the day, so a fully committed day is
+simply skipped rather than rewritten. The lock never crosses midnight: tomorrow's
+day-ahead schedule is an independent schedule and stays fully revisable.
+
+**Revision happens automatically.** The hourly maintenance pass (minute 20 UTC,
+`SCHEDULE_RETRY_ENABLED`) issues anything missing *and* re-issues existing schedules
+so blocks X+1..96 pick up newer forecast information. No manual `--force` needed. It
+costs zero provider calls — a revision reads stored generation/weather and recomputes
+P90 in process — so it cannot spend the Open-Meteo quota the forecast prefetch needs.
+Set `SCHEDULE_INTRADAY_REVISION_ENABLED=false` to go back to freezing whole days on
+first issue.
 
 Accuracy is tuned via `SCHEDULE_SIGMA_SCALE` (default `1.15` → ~10% MAPE,
 ~2% nMAE of capacity). Metrics are reported as **nMAE and ±10%/±15% band

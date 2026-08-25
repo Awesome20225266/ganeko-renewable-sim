@@ -1,10 +1,15 @@
 """Day-ahead P90 schedule orchestration: anchor -> build -> freeze -> persist.
 
-Freeze semantics matter here. A schedule is a published commitment for a date:
-once issued it must not move when today's LIVE simulation re-runs every 15
-minutes, otherwise the deviation being measured against it is a moving target
-and the comparison is meaningless. So `ensure_schedule` is a no-op when a
-current schedule already exists, unless explicitly forced.
+Freeze semantics matter here, and they are directional. A schedule is a published
+commitment for a date: the block we are currently inside, and every block before
+it, must not move — otherwise the deviation being measured against it is a moving
+target and the comparison is meaningless. Blocks still in the future are a
+different matter: newer forecast information *should* reach them.
+
+So `ensure_schedule` is a no-op when a current schedule exists and `force` is not
+set, and a FORWARD-ONLY revision when it is. The hourly maintenance pass
+(`run_schedule_retry`) supplies that force automatically, so revision needs no
+human; `protected_schedule_block_nos` is what makes it safe to run repeatedly.
 
 Anchor selection, best-available first:
   * a future date  -> the FORECAST run (a genuine day-ahead anchor)
@@ -26,6 +31,7 @@ from app.db.models import GenerationBlock, ScheduleBlock
 from app.engines.hybrid import BlockResult
 from app.engines.p90 import ScheduleParams, build_schedule
 from app.engines.spec import PlantSpec
+from app.immutability import protected_schedule_block_nos
 from app.logging_conf import get_logger
 from app.simulate import load_active_config
 from app.weather.normalize import NormalizedBlock
@@ -209,6 +215,11 @@ def ensure_schedule(
     Idempotent and frozen by default: returns {"issued": False, "reason": "frozen"}
     when a current schedule is already published. Pass force=True to re-issue
     (the prior version is demoted, not deleted).
+
+    A forced re-issue is **forward-only**: blocks up to and including the one
+    containing now keep the values they were published with, and only later blocks
+    take the new numbers. So a revision at 13:50 leaves 13:45-14:00 alone and takes
+    effect from 14:00-14:15. See `app.immutability.protected_schedule_block_nos`.
     """
     settings = settings or get_settings()
     if not settings.SCHEDULE_ENABLED:
@@ -249,6 +260,50 @@ def ensure_schedule(
             params_from(settings),
         )
 
+        # --- Forward-only revision -------------------------------------------
+        # A revision may only move blocks whose operational time has not arrived.
+        # Blocks 1..X (X = the block containing now) keep the values they were
+        # published with, so the commitment the deviation is measured against
+        # never moves under the operator's feet. A past date protects all 96; a
+        # future date protects none. Enforced here, in the single writer of
+        # `schedule_block`, so the daily job, the hourly retry and the CLI all
+        # inherit it.
+        # Column select rather than get_schedule(): ORM entities would linger in the
+        # identity map after the bulk DELETE below and clash with the re-inserted
+        # rows. Plain Rows carry the values without that side effect.
+        prior = {
+            r.block_no: r
+            for r in db.execute(
+                select(
+                    ScheduleBlock.block_no,
+                    ScheduleBlock.block_start,
+                    ScheduleBlock.block_end,
+                    ScheduleBlock.solar_p90_mw,
+                    ScheduleBlock.wind_p90_mw,
+                    ScheduleBlock.total_p90_mw,
+                    ScheduleBlock.solar_p90_mwh,
+                    ScheduleBlock.wind_p90_mwh,
+                    ScheduleBlock.total_p90_mwh,
+                    ScheduleBlock.solar_band_low_mw,
+                    ScheduleBlock.solar_band_high_mw,
+                    ScheduleBlock.wind_band_low_mw,
+                    ScheduleBlock.wind_band_high_mw,
+                    ScheduleBlock.total_band_low_mw,
+                    ScheduleBlock.total_band_high_mw,
+                    ScheduleBlock.anchor_mode,
+                    ScheduleBlock.plant_config_version,
+                    ScheduleBlock.issued_at,
+                ).where(
+                    ScheduleBlock.plant_code == plant_code,
+                    ScheduleBlock.sim_date == sim_date,
+                    ScheduleBlock.is_current.is_(True),
+                )
+            )
+        }
+        protected = protected_schedule_block_nos(
+            sim_date, [b.block_no for b in blocks], tz, settings
+        ) & prior.keys()
+
         # Preserve history: demote the prior version rather than deleting it.
         db.query(ScheduleBlock).filter(
             ScheduleBlock.plant_code == plant_code,
@@ -263,6 +318,37 @@ def ensure_schedule(
 
         issued_at = datetime.now(UTC)
         for b in blocks:
+            if b.block_no in protected:
+                # Republish the committed values verbatim, keeping the original
+                # issue time and anchor. `/schedule` reports rows[0].issued_at,
+                # which therefore keeps meaning "when this commitment was first
+                # published" rather than "when it was last touched".
+                p = prior[b.block_no]
+                db.add(ScheduleBlock(
+                    plant_code=plant_code,
+                    sim_date=sim_date,
+                    block_no=p.block_no,
+                    block_start=p.block_start,
+                    block_end=p.block_end,
+                    solar_p90_mw=p.solar_p90_mw,
+                    wind_p90_mw=p.wind_p90_mw,
+                    total_p90_mw=p.total_p90_mw,
+                    solar_p90_mwh=p.solar_p90_mwh,
+                    wind_p90_mwh=p.wind_p90_mwh,
+                    total_p90_mwh=p.total_p90_mwh,
+                    solar_band_low_mw=p.solar_band_low_mw,
+                    solar_band_high_mw=p.solar_band_high_mw,
+                    wind_band_low_mw=p.wind_band_low_mw,
+                    wind_band_high_mw=p.wind_band_high_mw,
+                    total_band_low_mw=p.total_band_low_mw,
+                    total_band_high_mw=p.total_band_high_mw,
+                    anchor_mode=p.anchor_mode,
+                    schedule_version=settings.SCHEDULE_VERSION,
+                    plant_config_version=p.plant_config_version,
+                    issued_at=p.issued_at,
+                    is_current=True,
+                ))
+                continue
             db.add(ScheduleBlock(
                 plant_code=plant_code,
                 sim_date=sim_date,
@@ -288,21 +374,29 @@ def ensure_schedule(
                 is_current=True,
             ))
 
-        total_mwh = sum(b.total_p90_mwh for b in blocks)
+        # Totals over what was PUBLISHED (protected blocks kept their old values),
+        # so the reported day energy matches the blocks it is made of.
+        effective = [prior[b.block_no] if b.block_no in protected else b for b in blocks]
+        total_mwh = sum(b.total_p90_mwh for b in effective)
         age = anchor.age_hours
         logger.info(
-            "Schedule issued plant=%s date=%s anchor=%s anchor_age=%s blocks=%d total=%.1fMWh",
+            "Schedule issued plant=%s date=%s anchor=%s anchor_age=%s blocks=%d "
+            "revised=%d protected=%d total=%.1fMWh",
             plant_code, sim_date, mode,
             f"{age:.1f}h" if age is not None else "unknown",
-            len(blocks), total_mwh,
+            len(blocks), len(blocks) - len(protected), len(protected), total_mwh,
         )
         return {
             "issued": True, "plant_code": plant_code,
             "sim_date": sim_date.isoformat(), "anchor_mode": mode,
             "anchor_age_hours": round(age, 2) if age is not None else None,
             "blocks": len(blocks),
-            "solar_mwh": round(sum(b.solar_p90_mwh for b in blocks), 3),
-            "wind_mwh": round(sum(b.wind_p90_mwh for b in blocks), 3),
+            # Forward-only revision accounting: how much of the day this call was
+            # actually allowed to move.
+            "blocks_revised": len(blocks) - len(protected),
+            "blocks_protected": len(protected),
+            "solar_mwh": round(sum(b.solar_p90_mwh for b in effective), 3),
+            "wind_mwh": round(sum(b.wind_p90_mwh for b in effective), 3),
             "total_mwh": round(total_mwh, 3),
             "issued_at": issued_at.isoformat(),
         }

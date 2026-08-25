@@ -199,28 +199,68 @@ def run_daily_job() -> None:
 
 
 def run_schedule_retry() -> None:
-    """Hourly self-heal for a schedule the daily job could not issue.
+    """Hourly schedule maintenance: issue what is missing, revise what is future.
 
-    The daily job gets exactly one attempt at its publication deadline. Before this job a
-    single rate-limited night meant the date never got a schedule at all: the API served
-    "No schedule issued" indefinitely and nothing ever retried. Idempotent — a published
-    schedule is frozen, so in the normal case this is two indexed queries per date.
+    Two responsibilities, deliberately in ONE existing job rather than a second
+    scheduling architecture — they iterate exactly the same dates, run at the same
+    cadence, and neither touches the weather provider:
+
+      * **missing schedule -> issue it.** The original self-heal. The daily job gets
+        one attempt at its publication deadline; before this job a single
+        rate-limited night meant the date never got a schedule at all and nothing
+        ever retried.
+
+      * **existing schedule -> revise its future.** `ensure_schedule(force=True)` can
+        only move blocks beyond the operational lock window
+        (`SCHEDULE_REVISION_LOCK_MINUTES`, default 2h): the current block and the
+        next two hours are protected inside `ensure_schedule` itself, so committed
+        dispatch is structurally untouchable no matter how often this runs. That is
+        what makes it safe to do automatically instead of by hand.
+
+    Costs zero provider calls: `ensure_schedule` reads stored generation and weather
+    and recomputes P90 in process, so this cannot spend the Open-Meteo quota the
+    forecast prefetch depends on.
+
+    Failures are logged, not recorded in ErrorLog: a revision that cannot find a
+    fresh anchor is not a missed publication, and the next hour simply tries again.
     """
     settings = get_settings()
     if not (settings.SCHEDULE_ENABLED and settings.SCHEDULE_RETRY_ENABLED):
         return
+    from app.immutability import first_revisable_schedule_block_no
     from app.schedule import ensure_schedule, has_schedule
 
+    revise = settings.SCHEDULE_INTRADAY_REVISION_ENABLED
     for plant_code, tz in _active_plants():
         today = datetime.now(ZoneInfo(tz)).date()
         for h in range(0, settings.SCHEDULE_HORIZON_DAYS + 1):
             sched_date = today + timedelta(days=h)
             with session_scope() as db:
-                if has_schedule(db, plant_code, sched_date):
+                exists = has_schedule(db, plant_code, sched_date)
+            if exists:
+                if not revise:
+                    continue
+                # Ask the shared helper whether anything is still revisable rather
+                # than re-deriving the boundary here: the lock window means a date can
+                # be fully committed well before midnight, and a second copy of that
+                # arithmetic is exactly how the two would drift apart. None => every
+                # block is inside the lock, so skip instead of rewriting 96
+                # carried-forward rows for no reason.
+                if first_revisable_schedule_block_no(sched_date, tz) is None:
                     continue
             try:
-                result = ensure_schedule(plant_code, sched_date)
-                if result.get("issued"):
+                result = ensure_schedule(plant_code, sched_date, force=exists)
+                if not result.get("issued"):
+                    continue
+                if exists:
+                    logger.info(
+                        "Schedule revised forward plant=%s date=%s revised=%d "
+                        "protected=%d anchor=%s age=%sh",
+                        plant_code, sched_date, result.get("blocks_revised"),
+                        result.get("blocks_protected"), result.get("anchor_mode"),
+                        result.get("anchor_age_hours"),
+                    )
+                else:
                     logger.info(
                         "Schedule retry recovered plant=%s date=%s anchor=%s age=%sh",
                         plant_code, sched_date, result.get("anchor_mode"),
@@ -228,8 +268,8 @@ def run_schedule_retry() -> None:
                     )
             except Exception as exc:  # noqa: BLE001 — retry again next hour
                 logger.warning(
-                    "Schedule retry still failing plant=%s date=%s: %s",
-                    plant_code, sched_date, exc,
+                    "Schedule %s failed plant=%s date=%s: %s",
+                    "revision" if exists else "retry", plant_code, sched_date, exc,
                 )
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
@@ -26,6 +26,12 @@ from app.db.models import (
 )
 from app.engines.hybrid import BlockResult, simulate_day
 from app.engines.spec import PlantSpec
+from app.immutability import (
+    DIAGNOSTIC_BLOCK_LABEL,
+    current_block_no,
+    diagnostic_version,
+    frozen_actual_block_nos,
+)
 from app.logging_conf import get_logger
 from app.quality import QualityReport, check_day
 from app.weather.client import (
@@ -100,10 +106,13 @@ def _plantlike(spec: PlantSpec) -> PlantLike:
 
 
 def _current_block_no(tz: str, sim_date: date) -> int:
-    now = datetime.now(ZoneInfo(tz))
-    if now.date() != sim_date:
-        return 96 if now.date() > sim_date else 0
-    return now.hour * 4 + now.minute // 15 + 1
+    """Block containing 'now' in plant-local time.
+
+    Thin alias: the interval convention lives in `app.immutability` so the
+    labelling boundary here and the schedule-protection boundary there can never
+    drift apart.
+    """
+    return current_block_no(tz, sim_date)
 
 
 def _summarize(spec: PlantSpec, results: list[BlockResult]) -> dict:
@@ -133,6 +142,52 @@ def _summarize(spec: PlantSpec, results: list[BlockResult]) -> dict:
     }
 
 
+def _published_blocks(
+    db: Session,
+    plant_code: str,
+    sim_date: date,
+    data_mode: str,
+    sim_v: str,
+    model_v: str,
+) -> dict[int, object]:
+    """Currently-published rows for one plant/date/mode/version, keyed by block_no.
+
+    A column select, not an ORM query, on purpose. Loading GenerationBlock entities
+    would put them in the session's identity map, and the bulk DELETE in
+    `_persist_generation` (synchronize_session=False) leaves those instances stale —
+    then the re-inserted rows reuse the same primary keys and SQLAlchemy warns about
+    a clashing identity. Plain Rows never enter the identity map.
+    """
+    return {
+        row.block_no: row
+        for row in db.execute(
+            select(
+                GenerationBlock.block_no,
+                GenerationBlock.data_label,
+                GenerationBlock.solar_mw,
+                GenerationBlock.solar_mwh,
+                GenerationBlock.wind_mw,
+                GenerationBlock.wind_mwh,
+                GenerationBlock.total_mw,
+                GenerationBlock.total_mwh,
+                GenerationBlock.solar_cuf,
+                GenerationBlock.wind_cuf,
+                GenerationBlock.hybrid_cuf,
+                GenerationBlock.solar_status,
+                GenerationBlock.wind_status,
+                GenerationBlock.data_quality_status,
+            ).where(
+                GenerationBlock.plant_code == plant_code,
+                GenerationBlock.sim_date == sim_date,
+                GenerationBlock.data_mode == data_mode,
+                GenerationBlock.simulation_version == sim_v,
+                GenerationBlock.model_assumption_version == model_v,
+                GenerationBlock.is_current.is_(True),
+            )
+        )
+    }
+
+
 def _persist_generation(
     db: Session,
     spec: PlantSpec,
@@ -144,40 +199,118 @@ def _persist_generation(
     weather_fetch_time: datetime,
     settings: Settings,
     is_reprocess: bool,
-) -> None:
-    sim_v = settings.SIMULATION_VERSION
+) -> list[BlockResult]:
+    """Persist one day of generation. Returns the results as actually PUBLISHED.
+
+    The return value matters: an already-published Actual is carried forward
+    unchanged, so the freshly simulated `results` are not necessarily what ends up
+    in the table. Callers must summarise/report the returned list, not their input,
+    or the daily totals would disagree with the blocks they are made of.
+    """
+    published_sim_v = settings.SIMULATION_VERSION
     model_v = settings.MODEL_ASSUMPTION_VERSION
     base_label = MODE_LABEL[mode]
-    summary_label = "REPROCESSED" if is_reprocess else base_label
+
+    # --- Administrative re-run = diagnostic, NOT a republished Actual ---------
+    # An admin reprocess must never displace what consumers are being served. It
+    # writes into its own version space with is_current=False, so:
+    #   * uq_generation_block / uq_daily_summary cannot collide with the published
+    #     rows (both constraints include the two version columns);
+    #   * every read helper filters is_current=True, so no API returns it;
+    #   * the published rows are left completely untouched — see the demote step,
+    #     which is skipped entirely below.
+    # The values are stored and inspectable for diagnosis, which is the point.
+    write_sim_v = diagnostic_version(published_sim_v) if is_reprocess else published_sim_v
+    row_is_current = not is_reprocess
+
+    summary_label = DIAGNOSTIC_BLOCK_LABEL if is_reprocess else base_label
     if quality.status == "FAILED":
         summary_label = "FAILED"
 
     now_utc = datetime.now(UTC)
     current_block = _current_block_no(spec.timezone, sim_date) if mode == DataMode.LIVE else 96
 
+    # --- Actual immutability -------------------------------------------------
+    # Read what is already published BEFORE the delete below, so an Actual that has
+    # already been served can be carried forward instead of recomputed.
+    #
+    # Enforced here, in the single writer of `generation_block`, rather than in any
+    # route or job: /live, /current, the wrapper, the dashboard, the live-refresh
+    # job, the daily job and the CLI all reach the table through this function, so
+    # no caller can bypass the invariant by accident.
+    frozen: set[int] = set()
+    prior: dict[int, object] = {}
+    # Blocks whose stored label should be reused verbatim. Only same-mode rows
+    # qualify: an inherited LIVE value republished into the HISTORICAL series must
+    # still be labelled HISTORICAL_SIMULATED, because the label names the series a
+    # consumer asked for, not where the number originally came from.
+    same_mode: set[int] = set()
+    inherited = 0
+    if not is_reprocess:
+        prior = _published_blocks(
+            db, spec.plant_code, sim_date, mode.value, published_sim_v, model_v
+        )
+        same_mode = set(prior)
+
+        if mode == DataMode.HISTORICAL:
+            # One Actual per interval, across the whole lifecycle. A day that was
+            # served live already has an Actual of record; when it later becomes
+            # historical, that number must be REPUBLISHED, not recomputed from the
+            # archive. Without this the value a consumer reads would change once, at
+            # the LIVE->HISTORICAL handover — measured on real production data for
+            # 2026-08-24: 55 of 96 blocks differed, up to -24 MW on a single block
+            # and -3.13% on day energy.
+            #
+            # Same-mode rows win: a HISTORICAL Actual already published is itself
+            # immutable, so it is never replaced by the LIVE series either.
+            for no, row in _published_blocks(
+                db, spec.plant_code, sim_date, DataMode.LIVE.value,
+                published_sim_v, model_v,
+            ).items():
+                if no not in prior:
+                    prior[no] = row
+                    inherited += 1
+
+        frozen = frozen_actual_block_nos(
+            {no: row.data_label for no, row in prior.items()}, settings
+        )
+        if frozen:
+            logger.info(
+                "Immutable actuals preserved plant=%s date=%s mode=%s blocks=%d/%d"
+                " (inherited from LIVE: %d)",
+                spec.plant_code, sim_date, mode.value, len(frozen), len(results),
+                len(frozen & (set(prior) - same_mode)),
+            )
+
     # Versioning: demote all currently-current rows for this plant/date/mode, then
     # replace rows for THIS (sim_version, model_version) — preserving other versions.
+    #
+    # A diagnostic run skips the demote entirely: it must leave the published rows
+    # exactly as they are, is_current and all. It only ever replaces its own
+    # previous diagnostic (write_sim_v is the reprocess version space).
+    if not is_reprocess:
+        db.query(GenerationBlock).filter(
+            GenerationBlock.plant_code == spec.plant_code,
+            GenerationBlock.sim_date == sim_date,
+            GenerationBlock.data_mode == mode.value,
+            GenerationBlock.is_current.is_(True),
+        ).update({GenerationBlock.is_current: False}, synchronize_session=False)
     db.query(GenerationBlock).filter(
         GenerationBlock.plant_code == spec.plant_code,
         GenerationBlock.sim_date == sim_date,
         GenerationBlock.data_mode == mode.value,
-        GenerationBlock.is_current.is_(True),
-    ).update({GenerationBlock.is_current: False}, synchronize_session=False)
-    db.query(GenerationBlock).filter(
-        GenerationBlock.plant_code == spec.plant_code,
-        GenerationBlock.sim_date == sim_date,
-        GenerationBlock.data_mode == mode.value,
-        GenerationBlock.simulation_version == sim_v,
+        GenerationBlock.simulation_version == write_sim_v,
         GenerationBlock.model_assumption_version == model_v,
     ).delete(synchronize_session=False)
 
+    published: list[BlockResult] = []
     for r in results:
         # Per-block label: live future blocks are forecast.
         block_label = base_label
         weather_model = None
         forecast_generated_at = None
         if is_reprocess:
-            block_label = "REPROCESSED"
+            block_label = DIAGNOSTIC_BLOCK_LABEL
         elif mode == DataMode.LIVE and r.block_no > current_block:
             block_label = "FORECAST_SIMULATED"
             weather_model = weather_source
@@ -185,6 +318,32 @@ def _persist_generation(
         elif mode == DataMode.FORECAST:
             weather_model = weather_source
             forecast_generated_at = weather_fetch_time
+
+        if r.block_no in frozen:
+            # Already published as an Actual: republish the stored numbers verbatim
+            # and keep the original label. Only the physical values and their
+            # quality verdict are carried over — the run/lineage columns below
+            # (weather_source, weather_fetch_time, processed_at) still describe the
+            # run that wrote this row, which is both honest and required: the
+            # freshness gate in `_latest_live_times` reads weather_fetch_time off
+            # the newest row, and if frozen rows reported an old fetch time then
+            # late in the day, once all 96 blocks are frozen, every single read
+            # would look stale and launch another provider call.
+            p = prior[r.block_no]
+            r = replace(
+                r,
+                solar_mw=p.solar_mw, solar_mwh=p.solar_mwh,
+                wind_mw=p.wind_mw, wind_mwh=p.wind_mwh,
+                total_mw=p.total_mw, total_mwh=p.total_mwh,
+                solar_cuf=p.solar_cuf, wind_cuf=p.wind_cuf, hybrid_cuf=p.hybrid_cuf,
+                solar_status=p.solar_status, wind_status=p.wind_status,
+                data_quality_status=p.data_quality_status,
+            )
+            if r.block_no in same_mode:
+                # Republishing within the same series: keep the stored label, so a
+                # published Actual can never be downgraded to a forecast label.
+                block_label = p.data_label
+        published.append(r)
 
         db.add(
             GenerationBlock(
@@ -208,20 +367,22 @@ def _persist_generation(
                 data_source=weather_source,
                 data_label=block_label,
                 data_quality_status=r.data_quality_status,
-                simulation_version=sim_v,
+                simulation_version=write_sim_v,
                 model_assumption_version=model_v,
                 plant_config_version=spec.config_version,
                 weather_source=weather_source,
                 weather_fetch_time=weather_fetch_time,
                 weather_model_used=weather_model,
                 forecast_generated_at=forecast_generated_at,
-                is_current=True,
+                is_current=row_is_current,
                 processed_at=now_utc,
             )
         )
 
-    # Daily summary (same versioning rules).
-    s = _summarize(spec, results)
+    # Daily summary (same versioning rules). Built from `published`, not `results`:
+    # with frozen blocks in play they differ, and a total that disagreed with the
+    # sum of its own blocks would be worse than either number alone.
+    s = _summarize(spec, published)
     db.query(DailySummary).filter(
         DailySummary.plant_code == spec.plant_code,
         DailySummary.sim_date == sim_date,
@@ -232,7 +393,7 @@ def _persist_generation(
         DailySummary.plant_code == spec.plant_code,
         DailySummary.sim_date == sim_date,
         DailySummary.data_mode == mode.value,
-        DailySummary.simulation_version == sim_v,
+        DailySummary.simulation_version == write_sim_v,
         DailySummary.model_assumption_version == model_v,
     ).delete(synchronize_session=False)
     db.add(
@@ -243,16 +404,17 @@ def _persist_generation(
             data_label=summary_label,
             data_quality_status=quality.status,
             blocks_count=len(results),
-            simulation_version=sim_v,
+            simulation_version=write_sim_v,
             model_assumption_version=model_v,
             plant_config_version=spec.config_version,
             weather_source=weather_source,
-            is_current=True,
+            is_current=row_is_current,
             processed_at=now_utc,
             **s,
         )
     )
     db.flush()
+    return published
 
 
 def _load_fallback_raw(
@@ -380,11 +542,14 @@ async def run_simulation(
             persist_weather_blocks(
                 db, plant_code, sim_date, mode, weather_source, blocks, fetched_at
             )
-            _persist_generation(
+            published = _persist_generation(
                 db, spec, sim_date, mode, results, quality,
                 weather_source, fetched_at, settings, is_reprocess,
             )
-            summary = _summarize(spec, results)
+            # Report what was published, not what was simulated — frozen actuals
+            # mean the two can differ, and the caller (CLI, /admin/reprocess,
+            # dashboard) is asking what the API will now serve.
+            summary = _summarize(spec, published)
             run_status = "REPROCESSED" if is_reprocess else quality.status
             message = "; ".join(quality.issues) if quality.issues else "ok"
             if weather_from_cache:

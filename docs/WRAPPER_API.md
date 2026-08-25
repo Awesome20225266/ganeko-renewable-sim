@@ -16,12 +16,48 @@ Forecast is blocked in three layers: (1) no forecast route exists and future dat
 rejected at validation, (2) any `FORECAST_SIMULATED` block/summary is stripped from
 responses, (3) `/current` returns **403** if its reading is a forecast.
 
+## Actuals are immutable
+
+An Actual is **written once and never revised**. Once a 15-minute block has been
+published as `LIVE_ESTIMATED` or `HISTORICAL_SIMULATED`, re-reading it returns the
+same number forever — even though the weather provider keeps revising its own view
+of the past (measured 2026-08-25: already-elapsed intervals came back 19–56%
+brighter on a later model run, which used to restate completed blocks mid-day).
+
+Every block carries **`is_final`**:
+
+| `is_final` | Meaning |
+|---|---|
+| `true` | Settled Actual. Safe to store, reconcile and act on; it will never change. |
+| `false` | Not an Actual yet — a forecast block, still expected to move. (Historical Actuals always report `true`.) |
+
+`/today-completed-blocks` also returns **`as_of`** — the vintage of the weather
+behind the not-yet-final part of the response — so a polling client can tell one
+refresh from the next. `/current` already carried this field.
+
+**The same interval keeps one value for its whole life.** A block you read today
+from `/today-completed-blocks` returns that exact number tomorrow from
+`/historical` — the two endpoints never disagree about the same 15 minutes, so you
+can reconcile across them without allowing for drift.
+
+A published Actual has **no override path**. Admin reprocess recomputes a date into
+a separate diagnostic record that is never served, so nothing — no read, no refresh,
+no admin action — changes a number you have already been given.
+
+`/schedule` is different by design: it is a forward commitment, so it is revised
+automatically as better forecasts arrive — but only **beyond a 2-hour operational
+lock**. The block you are inside and the next two hours are committed dispatch and
+cannot move; the first block a revision may touch is the one starting 2h15m after the
+current block began. It never rewrites a block already past, nor any schedule for a
+date that has finished.
+
 ## Configuration (environment variables)
 
 ```
 RENEWABLE_PLANT_ID=HYBRID01
 RENEWABLE_PLANT_TZ=Asia/Kolkata
 RENEWABLE_WRAPPER_USER_API_KEY=<key your users send>   # optional; blank = open
+GENERATION_IMMUTABILITY_CUTOVER=2026-08-25T15:00:00+05:30   # when enforcement starts
 ```
 
 - The wrapper reads data **in-process** — there is **no provider key** to set or maintain.

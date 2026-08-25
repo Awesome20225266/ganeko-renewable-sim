@@ -136,13 +136,16 @@ def fetch_range(plant_id: str, start_iso: str, end_iso: str) -> list:
     try:
         with session_scope() as db:
             blocks = get_blocks_range(db, plant_id, s, e)
+            tz = load_active_config(db, plant_id).timezone
             by_day: dict[date_cls, list] = {}
             for b in blocks:
                 by_day.setdefault(b.sim_date, []).append(b)
             return [
                 {
                     "sim_date": d.isoformat(),
-                    "blocks": [_block_to_out(b).model_dump(mode="json") for b in by_day[d]],
+                    "blocks": [
+                        _block_to_out(b, tz).model_dump(mode="json") for b in by_day[d]
+                    ],
                 }
                 for d in sorted(by_day)
             ]

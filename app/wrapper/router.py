@@ -43,6 +43,9 @@ BLOCK_COLUMNS = [
     "sim_date", "block_no", "block_start", "block_end",
     "solar_mw", "wind_mw", "total_mw",
     "solar_mwh", "wind_mwh", "total_mwh", "data_label",
+    # Appended, never inserted: an existing Excel/Power Query import keeps every
+    # column it already maps and simply gains one at the end.
+    "is_final",
 ]
 SUMMARY_COLUMNS = [
     "sim_date", "data_label", "solar_mwh", "wind_mwh", "total_mwh",
@@ -100,6 +103,10 @@ def _clean_block(b: dict, sim_date: str | None) -> dict:
         "wind_mwh": b.get("wind_mwh"),
         "total_mwh": b.get("total_mwh"),
         "data_label": b.get("data_label"),
+        # True once this block is a published Actual that can never be restated.
+        # Without it a consumer cannot tell a settled block from one the old
+        # rewrite-on-refresh behaviour still governs (pre-cutover dates).
+        "is_final": b.get("is_final", False),
     }
 
 
@@ -165,6 +172,10 @@ def today_completed_blocks(fmt: str = Query("json", alias="format", pattern="^(j
         "plant_id": plant,
         "current_block_no": current_block_no,
         "data_policy": DATA_POLICY,
+        # Vintage of the weather behind the not-yet-final part of this response.
+        # /current already carried one; this route did not, so a client polling
+        # completed blocks had no way to tell one refresh from the next.
+        "as_of": d.get("as_of"),
         "blocks": blocks,
     }
 
