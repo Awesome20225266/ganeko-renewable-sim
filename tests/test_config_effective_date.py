@@ -309,3 +309,25 @@ def test_dashboard_config_route_also_honours_the_effective_date(client):
         assert before in _active_versions(db)
         assert load_config_for_date(db, PLANT, date(2028, 5, 31)).config_version == before
         assert load_config_for_date(db, PLANT, date(2028, 6, 1)).wind_loss_factor == 0.11
+
+
+def test_get_config_reports_the_effective_date(client):
+    """GET must show what the database stores.
+
+    GET and PUT used to build PlantConfigOut from two separate copies of the same
+    field list. PUT reported the effective date and GET reported null for the very
+    same row, which is what made a correct production rollout look broken.
+    """
+    r = client.put(
+        f"/plants/{PLANT}/config",
+        headers=ADMIN,
+        json={"wind_loss_factor": 0.07, "effective_from_date": "2029-03-04"},
+    )
+    assert r.status_code == 200, r.text
+    put_body = r.json()
+
+    g = client.get(f"/plants/{PLANT}/config", headers=ADMIN)
+    assert g.status_code == 200, g.text
+    assert g.json()["effective_from_date"] == "2029-03-04"
+    # GET and PUT must describe the same row identically.
+    assert g.json() == put_body

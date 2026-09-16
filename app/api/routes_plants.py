@@ -101,33 +101,11 @@ def plant_config(code: str, ctx: AuthContext = Depends(require_read)):
         except ValueError:
             raise HTTPException(404, f"Unknown plant '{code}'") from None
         ver = db.query(SimulationVersion).order_by(SimulationVersion.created_at.desc()).first()
-        return PlantConfigOut(
-            plant_code=cfg.plant_code,
-            plant_name=cfg.plant_name,
-            latitude=cfg.latitude,
-            longitude=cfg.longitude,
-            timezone=cfg.timezone,
-            config_version=cfg.config_version,
-            solar_ac_mw=cfg.solar_ac_mw,
-            solar_dc_mw=cfg.solar_dc_mw,
-            dc_ac_ratio=cfg.dc_ac_ratio,
-            solar_performance_ratio=cfg.solar_performance_ratio,
-            solar_loss_factor=cfg.solar_loss_factor,
-            temp_coeff_pct_per_c=cfg.temp_coeff_pct_per_c,
-            panel_tilt=cfg.panel_tilt,
-            panel_azimuth=cfg.panel_azimuth,
-            use_global_tilted_irradiance=cfg.use_global_tilted_irradiance,
-            wind_ac_mw=cfg.wind_ac_mw,
-            wind_loss_factor=cfg.wind_loss_factor,
-            hub_height_m=cfg.hub_height_m,
-            cut_in_ms=cfg.cut_in_ms,
-            rated_ms=cfg.rated_ms,
-            cut_out_ms=cfg.cut_out_ms,
-            air_density_correction=cfg.air_density_correction,
-            block_minutes=cfg.block_minutes,
-            wind_power_curve=cfg.wind_power_curve,
-            assumptions=(ver.assumptions if ver else {}),
-        )
+        # One serialiser, shared with the PUT handler. This used to be a second, inline
+        # copy of the same 20 assignments; when `effective_from_date` was added only the
+        # other copy got it, so GET silently reported `null` for a date the database had
+        # stored correctly — and a real rollout was rolled back on that false reading.
+        return _config_to_out(cfg, ver.assumptions if ver else {})
 
 
 def _config_to_out(cfg: PlantConfig, assumptions: dict) -> PlantConfigOut:
