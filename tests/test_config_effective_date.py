@@ -281,3 +281,31 @@ def test_forward_dated_config_changes_tomorrow_but_not_today(client, monkeypatch
     assert wind_mwh(tomorrow, "FORECAST") > tomorrow_before * 2, (
         "tomorrow's wind did not pick up the new config"
     )
+
+
+def test_dashboard_config_route_also_honours_the_effective_date(client):
+    """The keyless console route writes config too, and is what an operator uses.
+
+    Regression guard: the first production rollout went out through this route while
+    only the keyed `/plants/{code}/config` route was covered, so a drop of
+    `effective_from_date` here would not have failed any test.
+    """
+    with session_scope() as db:
+        before = load_active_config(db, PLANT).config_version
+
+    r = client.put(
+        f"/dashboard/api/config/{PLANT}",
+        json={"wind_loss_factor": 0.11, "effective_from_date": "2028-06-01"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["config_version"] == before + 1
+
+    with session_scope() as db:
+        new = load_active_config(db, PLANT)
+        assert new.effective_from_date == date(2028, 6, 1), (
+            f"dashboard route dropped the effective date: {new.effective_from_date!r}"
+        )
+        # Dated version must not retire the one earlier dates still need.
+        assert before in _active_versions(db)
+        assert load_config_for_date(db, PLANT, date(2028, 5, 31)).config_version == before
+        assert load_config_for_date(db, PLANT, date(2028, 6, 1)).wind_loss_factor == 0.11
