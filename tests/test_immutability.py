@@ -141,7 +141,13 @@ def _seeded():
             )
             db.add(plant)
             db.flush()
-            skip = {"id", "plant_id", "plant_code", "plant_name", "created_at"}
+            skip = {
+                "id", "plant_id", "plant_code", "plant_name", "created_at",
+                # Never clone a forward-dated cutover: this plant must have a config
+                # in force on every date it simulates, whatever another module left
+                # active on the shared database.
+                "effective_from_date",
+            }
             fields = {
                 c.key: getattr(base, c.key)
                 for c in inspect(PlantConfig).mapper.column_attrs

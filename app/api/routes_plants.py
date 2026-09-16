@@ -138,6 +138,7 @@ def _config_to_out(cfg: PlantConfig, assumptions: dict) -> PlantConfigOut:
         longitude=cfg.longitude,
         timezone=cfg.timezone,
         config_version=cfg.config_version,
+        effective_from_date=cfg.effective_from_date,
         solar_ac_mw=cfg.solar_ac_mw,
         solar_dc_mw=cfg.solar_dc_mw,
         dc_ac_ratio=cfg.dc_ac_ratio,

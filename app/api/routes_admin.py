@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 
 from app.api.deps import AuthContext, require_admin
@@ -13,6 +15,9 @@ from app.api.schemas import (
     KeyInfoOut,
     KeyListOut,
     MessageOut,
+    RefreshForecastRequest,
+    RefreshForecastResponse,
+    RefreshForecastResultItem,
     ReprocessRequest,
     ReprocessResponse,
     ReprocessResultItem,
@@ -20,7 +25,7 @@ from app.api.schemas import (
 from app.db.base import session_scope
 from app.db.models import ApiKey
 from app.security import generate_api_key, hash_key, key_prefix
-from app.simulate import run_simulation
+from app.simulate import load_active_config, run_simulation
 from app.weather.client import DataMode
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -54,6 +59,62 @@ async def reprocess(req: ReprocessRequest, ctx: AuthContext = Depends(require_ad
             )
         )
     return ReprocessResponse(
+        plant_code=req.plant_code, triggered=len(results), results=results
+    )
+
+
+@router.post("/refresh-forecast", response_model=RefreshForecastResponse)
+async def refresh_forecast(
+    req: RefreshForecastRequest, ctx: AuthContext = Depends(require_admin)
+):
+    """Re-run FORECAST + re-issue the day-ahead P90 schedule for FUTURE dates.
+
+    The scheduler skips a forecast that is still fresh, so after a config change the
+    already-computed day-ahead would otherwise coast on the old assumptions until it
+    aged out. This forces it, and only forward.
+    """
+    from app.schedule import ensure_schedule, get_schedule
+
+    with session_scope() as db:
+        tz = load_active_config(db, req.plant_code).timezone
+    today = datetime.now(ZoneInfo(tz)).date()
+    not_future = sorted({d.isoformat() for d in req.dates if d <= today})
+    if not_future:
+        raise HTTPException(
+            400,
+            f"Future dates only (plant-local today is {today}). "
+            f"Rejected: {', '.join(not_future)}. Today's and past generation is "
+            f"published data — use /admin/reprocess for a diagnostic re-run.",
+        )
+
+    results: list[RefreshForecastResultItem] = []
+    for d in sorted(set(req.dates)):
+        summary = await run_simulation(
+            req.plant_code, d, DataMode.FORECAST,
+            triggered_by="admin-forecast-refresh", force_refetch=True,
+        )
+        item = RefreshForecastResultItem(
+            sim_date=d,
+            status=summary.status,
+            data_label=summary.data_label,
+            blocks_written=summary.blocks_written,
+            total_mwh=round(summary.total_mwh, 3),
+            issues=summary.issues,
+        )
+        if req.reissue_schedule and summary.status != "FAILED":
+            try:
+                await run_in_threadpool(ensure_schedule, req.plant_code, d, force=True)
+                with session_scope() as db:
+                    rows = get_schedule(db, req.plant_code, d)
+                item.schedule_reissued = True
+                item.schedule_total_p90_mwh = round(
+                    sum(r.total_p90_mwh or 0.0 for r in rows), 3
+                )
+            except Exception as exc:  # noqa: BLE001 - surfaced, not swallowed
+                item.issues = [*item.issues, f"schedule re-issue failed: {exc}"]
+        results.append(item)
+
+    return RefreshForecastResponse(
         plant_code=req.plant_code, triggered=len(results), results=results
     )
 

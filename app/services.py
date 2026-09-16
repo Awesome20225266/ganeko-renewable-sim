@@ -14,7 +14,16 @@ from app.db.models import ApiKey, Plant, PlantConfig
 from app.security import generate_api_key, hash_key, key_prefix
 from app.simulate import load_active_config
 
-_CARRY_EXCLUDE = ("id", "plant_id", "config_version", "is_active", "created_at")
+_CARRY_EXCLUDE = (
+    "id",
+    "plant_id",
+    "config_version",
+    "is_active",
+    "created_at",
+    # Never inherited: an effective date belongs to the change that set it. Carrying
+    # it forward would silently re-date every later edit to an old cutover.
+    "effective_from_date",
+)
 
 
 def create_config_version(db: Session, code: str, fields: dict) -> PlantConfig:
@@ -37,9 +46,14 @@ def create_config_version(db: Session, code: str, fields: dict) -> PlantConfig:
     if carried.get("solar_ac_mw"):
         carried["dc_ac_ratio"] = round(carried["solar_dc_mw"] / carried["solar_ac_mw"], 4)
 
-    db.query(PlantConfig).filter(
-        PlantConfig.plant_code == code, PlantConfig.is_active.is_(True)
-    ).update({PlantConfig.is_active: False}, synchronize_session=False)
+    # A config with no effective date supersedes everything, so the previous versions
+    # are retired as before. A FORWARD-DATED config does not: earlier dates are still
+    # served by the version they were published under, so that version must stay
+    # active or `load_config_for_date` would find nothing for them.
+    if carried.get("effective_from_date") is None:
+        db.query(PlantConfig).filter(
+            PlantConfig.plant_code == code, PlantConfig.is_active.is_(True)
+        ).update({PlantConfig.is_active: False}, synchronize_session=False)
 
     new_cfg = PlantConfig(
         plant_id=plant.id, config_version=new_version, is_active=True, **carried

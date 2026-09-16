@@ -83,6 +83,21 @@ recomputes a date and stores the result under its own `simulation_version` with
 `is_current=false`, so it is inspectable but never served. A published Actual has
 no override path at all — that is the point of calling it published.
 
+**Changing a model assumption without restating published days.** Set
+`effective_from_date` on a config update and the new version applies only from that
+`sim_date` onward; every earlier date keeps the version it was published under, even
+if it is later reprocessed. Then force the already-computed day-ahead onto the new
+version with `POST /admin/refresh-forecast` — FUTURE dates only, which is what makes
+it impossible to disturb an Actual from there.
+
+```bash
+# New assumptions take effect on 2026-09-17; today and all history keep the old ones.
+curl -X PUT -H "X-API-Key: $KEY" -H 'Content-Type: application/json'      -d '{"wind_loss_factor":0.0,"effective_from_date":"2026-09-17"}'      $B/plants/HYBRID01/config
+
+# Re-run the day-ahead forecast + re-issue its P90 schedule under the new version.
+curl -X POST -H "X-API-Key: $KEY" -H 'Content-Type: application/json'      -d '{"plant_code":"HYBRID01","dates":["2026-09-17"],"reissue_schedule":true}'      $B/admin/refresh-forecast
+```
+
 ```bash
 KEY=admin-dev-key-change-me
 B=http://localhost:8000
@@ -260,6 +275,13 @@ Then `python -m app.cli simulate --plant SOLAR02 --date <date>`.
 
 Config is **versioned**: change assumptions by inserting a new `config_version` (mark it
 `is_active`); old outputs are preserved and new runs reference the new version.
+
+`effective_from_date` (nullable) controls *when* a version starts applying. `NULL` means
+"every date" — the default, and what every pre-existing row carries. A future date makes
+the change forward-only: `load_config_for_date` keeps serving earlier dates from the
+version they were published under, so a forward-dated change cannot restate today or any
+history, even through a reprocess. A forward-dated version does **not** retire the one
+before it, because earlier dates still need it.
 
 ---
 

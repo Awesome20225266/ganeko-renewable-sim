@@ -67,6 +67,17 @@ class PlantConfig(Base):
     plant_code: Mapped[str] = mapped_column(String(64), index=True)
     config_version: Mapped[int] = mapped_column(Integer, default=1)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # First sim_date this version applies to. NULL means "every date", which is the
+    # historical behaviour and what every pre-existing row carries.
+    #
+    # A FUTURE date is what makes a config change forward-only: `load_config_for_date`
+    # keeps serving the older version to earlier dates, so today's published day and
+    # all history keep the assumptions they were computed under — even if someone
+    # later reprocesses them. Without this, changing a config silently restates every
+    # date the moment anything re-runs.
+    effective_from_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True, default=None
+    )
 
     # Location
     plant_name: Mapped[str] = mapped_column(String(255))

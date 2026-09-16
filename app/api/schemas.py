@@ -13,6 +13,7 @@ class PlantConfigOut(BaseModel):
     longitude: float
     timezone: str
     config_version: int
+    effective_from_date: date | None = None
     solar_ac_mw: float
     solar_dc_mw: float
     dc_ac_ratio: float
@@ -58,6 +59,14 @@ class PlantConfigUpdate(BaseModel):
     cut_out_ms: float | None = Field(None, gt=0)
     air_density_correction: bool | None = None
     wind_power_curve: list[list[float]] | None = None
+    effective_from_date: date | None = Field(
+        None,
+        description=(
+            "First sim_date the new version applies to. Omit for 'immediately, and "
+            "for every date'. Set a FUTURE date to leave today and all history on "
+            "the current version — including if they are later reprocessed."
+        ),
+    )
 
 
 class WeatherBlockOut(BaseModel):
@@ -251,6 +260,39 @@ class ReprocessResponse(BaseModel):
     plant_code: str
     triggered: int
     results: list[ReprocessResultItem]
+
+
+class RefreshForecastRequest(BaseModel):
+    """Re-run the FORECAST simulation for dates that have not started yet.
+
+    Deliberately narrower than /admin/reprocess, which writes a non-served
+    diagnostic. This republishes, so it is restricted to FUTURE dates: a forecast is
+    free to move, an Actual is not, and refusing today and the past is what makes
+    that impossible to get wrong from here.
+    """
+
+    plant_code: str
+    dates: list[date] = Field(..., min_length=1)
+    reissue_schedule: bool = Field(
+        True, description="Also re-issue the day-ahead P90 schedule for each date."
+    )
+
+
+class RefreshForecastResultItem(BaseModel):
+    sim_date: date
+    status: str
+    data_label: str
+    blocks_written: int
+    total_mwh: float
+    schedule_reissued: bool = False
+    schedule_total_p90_mwh: float | None = None
+    issues: list[str] = []
+
+
+class RefreshForecastResponse(BaseModel):
+    plant_code: str
+    triggered: int
+    results: list[RefreshForecastResultItem]
 
 
 class CreateKeyRequest(BaseModel):

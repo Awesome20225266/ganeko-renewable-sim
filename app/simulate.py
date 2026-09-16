@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings, get_settings
@@ -83,6 +83,16 @@ class RunSummary:
 
 
 def load_active_config(db: Session, plant_code: str) -> PlantConfig:
+    """The newest active config, ignoring effective dates.
+
+    This is the *metadata* accessor: timezone, capacities, coordinates — things a
+    caller needs before it knows which date it is working on, and things that do not
+    change the arithmetic of an already-published block. `create_config_version` also
+    builds on it, so a new version always inherits from the newest one.
+
+    Anything that COMPUTES generation for a specific date must use
+    `load_config_for_date` instead, or a forward-dated change would leak backwards.
+    """
     cfg = db.scalar(
         select(PlantConfig)
         .where(PlantConfig.plant_code == plant_code, PlantConfig.is_active.is_(True))
@@ -90,6 +100,38 @@ def load_active_config(db: Session, plant_code: str) -> PlantConfig:
     )
     if cfg is None:
         raise ValueError(f"No active config for plant '{plant_code}'")
+    return cfg
+
+
+def load_config_for_date(db: Session, plant_code: str, sim_date: date) -> PlantConfig:
+    """The config version in force FOR `sim_date` — the one simulations must use.
+
+    Picks the highest config_version among active versions whose
+    `effective_from_date` has arrived (NULL counts as "always in force"). That single
+    rule gives three properties the rollout depends on:
+
+      * a config dated tomorrow does not touch today or any history;
+      * a reprocess of an old date re-runs it under the assumptions it was
+        published with, not under today's;
+      * with no effective dates set anywhere, it degrades exactly to
+        `load_active_config` — which is what every existing plant has.
+    """
+    cfg = db.scalar(
+        select(PlantConfig)
+        .where(
+            PlantConfig.plant_code == plant_code,
+            PlantConfig.is_active.is_(True),
+            or_(
+                PlantConfig.effective_from_date.is_(None),
+                PlantConfig.effective_from_date <= sim_date,
+            ),
+        )
+        .order_by(PlantConfig.config_version.desc())
+    )
+    if cfg is None:
+        raise ValueError(
+            f"No active config for plant '{plant_code}' effective on {sim_date}"
+        )
     return cfg
 
 
@@ -455,7 +497,7 @@ async def run_simulation(
     is_reprocess = triggered_by == "reprocess"
 
     with session_scope() as db:
-        cfg = load_active_config(db, plant_code)
+        cfg = load_config_for_date(db, plant_code, sim_date)
         spec = PlantSpec.from_orm(cfg)
         if mode is None:
             mode = resolve_mode(sim_date, spec.timezone)

@@ -33,7 +33,7 @@ from app.engines.p90 import ScheduleParams, build_schedule
 from app.engines.spec import PlantSpec
 from app.immutability import protected_schedule_block_nos
 from app.logging_conf import get_logger
-from app.simulate import load_active_config
+from app.simulate import load_config_for_date
 from app.weather.normalize import NormalizedBlock
 
 logger = get_logger(__name__)
@@ -226,7 +226,7 @@ def ensure_schedule(
         return {"issued": False, "reason": "disabled"}
 
     with session_scope() as db:
-        cfg = load_active_config(db, plant_code)
+        cfg = load_config_for_date(db, plant_code, sim_date)
         spec = PlantSpec.from_orm(cfg)
         tz = cfg.timezone
 
@@ -413,7 +413,7 @@ def accuracy(db: Session, plant_code: str, sim_date: date) -> dict | None:
     sched = get_schedule(db, plant_code, sim_date)
     if not sched:
         return None
-    cfg = load_active_config(db, plant_code)
+    cfg = load_config_for_date(db, plant_code, sim_date)
     cap = cfg.solar_ac_mw + cfg.wind_ac_mw
 
     actual_rows = None
