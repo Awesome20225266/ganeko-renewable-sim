@@ -331,3 +331,38 @@ def test_get_config_reports_the_effective_date(client):
     assert g.json()["effective_from_date"] == "2029-03-04"
     # GET and PUT must describe the same row identically.
     assert g.json() == put_body
+
+
+def test_new_version_number_skips_past_retired_versions(client):
+    """Version numbers must not collide with versions that exist but are inactive.
+
+    Numbering from the ACTIVE config meant that retiring a version left a hole the
+    next save walked straight into: uq_plant_config_version rejected the insert and
+    the endpoint returned 500. This is exactly what happened in production after
+    tidying up throwaway config versions.
+    """
+    from sqlalchemy import func
+    from sqlalchemy import select as sa_select
+
+    # A forward-dated version leaves the previous one active, so retiring it cannot
+    # strand the plant without a config.
+    with session_scope() as db:
+        gap_ver = create_config_version(
+            db, PLANT, {"plant_name": "Gap", "effective_from_date": date(2031, 1, 1)}
+        ).config_version
+    with session_scope() as db:
+        db.query(PlantConfig).filter(
+            PlantConfig.plant_code == PLANT, PlantConfig.config_version == gap_ver
+        ).update({PlantConfig.is_active: False}, synchronize_session=False)
+        assert _active_versions(db), "precondition: an active config must remain"
+
+    with session_scope() as db:
+        nxt = create_config_version(db, PLANT, {"plant_name": "After Gap"})
+        assert nxt.config_version > gap_ver, (
+            f"reused version {nxt.config_version}, which already exists as {gap_ver}"
+        )
+        assert nxt.config_version == db.scalar(
+            sa_select(func.max(PlantConfig.config_version)).where(
+                PlantConfig.plant_code == PLANT
+            )
+        )

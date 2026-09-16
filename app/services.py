@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import ApiKey, Plant, PlantConfig
@@ -34,7 +34,14 @@ def create_config_version(db: Session, code: str, fields: dict) -> PlantConfig:
     """
     cur = load_active_config(db, code)
     plant = db.scalar(select(Plant).where(Plant.plant_code == code))
-    new_version = cur.config_version + 1
+    # Number from the highest version that EXISTS, not the highest still active.
+    # config_version is unique per plant, so deriving it from the active config meant
+    # that deactivating a version (or any version existing above the active one) made
+    # the next save collide on uq_plant_config_version and fail with a 500.
+    highest = db.scalar(
+        select(func.max(PlantConfig.config_version)).where(PlantConfig.plant_code == code)
+    )
+    new_version = (highest or cur.config_version) + 1
 
     carried = {
         c.name: getattr(cur, c.name)
